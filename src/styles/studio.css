@@ -1130,3 +1130,9 @@ fieldset:disabled {
     font-size: 12px;
   }
 }
+/* Graph instrument panel is a local dark surface inside the editing workspace. */
+.stage-wrap {
+  background: oklch(17% 0.028 263);
+  border-color: oklch(33% 0.045 263);
+  box-shadow: 0 8px 28px #07102718;
+}

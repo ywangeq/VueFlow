@@ -23,8 +23,10 @@ Adaptations: relative imports replace the upstream `@/` alias; component-local
 CSS host tokens and label width limits match this application. `motion.ts`
 retains only the original reduced-motion, spring, Bézier and frame-loop functions
 used by RelationGraph; unrelated application animations and global side effects
-are omitted. No upstream
-copyright or license is replaced by the application's non-commercial terms.
+are omitted. The local dark graph theme adds an angular instrument rendering branch to
+`neural.ts` via the graph-local `--graph-mode` token. It preserves the original
+light rendering path and scaffold geometry, focus, and animation behavior.
+No upstream copyright or license is replaced by the application's non-commercial terms.
 
 `src/components/ChapterGraph.vue` is this application's domain adapter. It
 computes positions from chapter order and renders the original Canvas graph

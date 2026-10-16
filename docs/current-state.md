@@ -40,3 +40,7 @@
 ## 债务与后续
 
 避免了 React/Vue 双运行时、重复状态和 MiniMax 专用逻辑散落 UI；保留上游图谱适配层。暂保留单工程本地文件存储、手动外部生成连接和浏览器混音；后续 worker/视频渲染接入独立适配器，不能把本地排队伪装成真实调用。
+
+## 图谱视觉
+
+图谱局部使用深海蓝画布、冷白文字、电蓝连线、紫色选中态和切角仪表。视觉参考 [React Flow Turbo Flow](https://reactflow.dev/examples/styling/turbo-flow) 的深色节点编辑器处理，不引入 React 或替换 Vue 底座。颜色通过图谱局部 CSS token 同时传给 DOM 与 Canvas，浅色原绘制路径保留。

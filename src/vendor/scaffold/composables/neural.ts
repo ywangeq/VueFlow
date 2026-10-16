@@ -14,6 +14,7 @@ export interface StagePalette {
   lime: RGB
   danger: RGB
   paper: RGB
+  dark: boolean
 }
 
 export function readStagePalette(el: Element): StagePalette {
@@ -27,6 +28,7 @@ export function readStagePalette(el: Element): StagePalette {
     lime: get('--graph-lime', '110, 190, 36'),
     danger: get('--graph-danger', '224, 68, 59'),
     paper: get('--graph-paper', '255, 255, 255'),
+    dark: css.getPropertyValue('--graph-mode').trim() === 'dark',
   }
 }
 
@@ -55,11 +57,50 @@ function tickRing(ctx: CanvasRenderingContext2D, x: number, y: number, r: number
   }
 }
 
+/** Local angular dark instruments; scaffold still owns geometry, focus and animation. */
+function instrumentPath(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, sides: number) {
+  ctx.beginPath()
+  for (let i = 0; i < sides; i++) {
+    const a = -Math.PI / 2 + Math.PI / sides + i / sides * TAU
+    const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r
+    if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+  }
+  ctx.closePath()
+}
+function paintDarkInstrument(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, p: StagePalette, c: RGB, active: boolean, core: boolean, ratio = 0) {
+  ctx.save()
+  const halo = ctx.createRadialGradient(x, y, r * .5, x, y, r * 1.65)
+  halo.addColorStop(0, rgba(c, active ? .18 : .06)); halo.addColorStop(1, rgba(c, 0))
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(x, y, r * 1.65, 0, TAU); ctx.fill()
+  instrumentPath(ctx, x, y, r, core ? 6 : 8)
+  ctx.fillStyle = rgba(p.paper, .97); ctx.fill()
+  ctx.strokeStyle = rgba(c, active || core ? .9 : .45); ctx.lineWidth = active ? 1.7 : 1.1; ctx.stroke()
+  instrumentPath(ctx, x, y, r * .85, core ? 6 : 8)
+  ctx.strokeStyle = rgba(c, .2); ctx.lineWidth = 1; ctx.stroke()
+  if (core) {
+    instrumentPath(ctx, x, y, r * .46, 6)
+    ctx.strokeStyle = rgba(p.lime, .85); ctx.lineWidth = 1.3; ctx.stroke()
+    ctx.fillStyle = rgba(p.lime, .12); ctx.fill()
+    ctx.fillStyle = rgba(p.accent, 1); ctx.beginPath(); ctx.arc(x, y, 3.2, 0, TAU); ctx.fill()
+    for (let i = 0; i < 3; i++) {
+      const a = i * TAU / 3 - Math.PI / 2
+      ctx.strokeStyle = rgba(c, .45); ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * .55, y + Math.sin(a) * r * .55); ctx.lineTo(x + Math.cos(a) * r * 1.12, y + Math.sin(a) * r * 1.12); ctx.stroke()
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = rgba(c, i < Math.ceil(ratio * 4) ? .9 : .16)
+      ctx.fillRect(x - 17 + i * 10, y + r * .64, 5, 2)
+    }
+  }
+  ctx.restore()
+}
+
 /* ── 珍珠球：软阴影 + 珠光渐变 + 青柠 / 蓝的淡虹彩 + 缓慢扫描的刻度环 ── */
 export function paintOrb(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t: number, p: StagePalette, opts: { alpha?: number; live?: boolean } = {}) {
   const alpha = opts.alpha ?? 1
   if (alpha <= 0.01 || r <= 1) return
   const live = opts.live ?? true
+  if (p.dark) { ctx.save(); ctx.globalAlpha = alpha; paintDarkInstrument(ctx, x, y, r, p, p.accent, true, true); ctx.restore(); return }
   ctx.save()
   ctx.globalAlpha = alpha
   // 外圈刻度：常态浅墨，一段蓝色扫描弧缓慢转动（导 Conduct）
@@ -124,6 +165,7 @@ export function paintDial(ctx: CanvasRenderingContext2D, x: number, y: number, s
   if (alpha <= 0.01 || s <= 4) return
   const R = s / 2
   const ratio = Math.max(0, Math.min(1, opts.ratio ?? 0))
+  if (p.dark) { ctx.save(); ctx.globalAlpha = alpha; paintDarkInstrument(ctx, x, y, R, p, c, !!opts.active, false, ratio); ctx.restore(); return }
   ctx.save()
   ctx.globalAlpha = alpha
   if (opts.active) {

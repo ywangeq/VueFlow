@@ -19,7 +19,7 @@ const columns = computed(() =>
   Math.max(1, Math.min(3, Math.floor(size.value.w / 190))),
 );
 const height = computed(() =>
-  Math.max(510, 270 + Math.ceil(props.chapters.length / columns.value) * 205),
+  Math.max(480, 240 + Math.ceil(props.chapters.length / columns.value) * 180),
 );
 
 function chapterState(chapter: Chapter) {
@@ -54,11 +54,11 @@ const nodes = computed<GraphNode[]>(() => {
     {
       id: "__project__",
       x: w / 2,
-      y: 108,
+      y: 104,
       label: props.projectTitle || "未命名工程",
       sub: `${props.chapters.length} 个章节 · 音视频共用工作流`,
       kind: "core",
-      size: 76,
+      size: 88,
       interactive: false,
       title: props.projectTitle,
     },
@@ -75,11 +75,11 @@ const nodes = computed<GraphNode[]>(() => {
     result.push({
       id: chapter.id,
       x: ((col + 0.5) * w) / rowCount,
-      y: 300 + row * 205,
+      y: 280 + row * 180,
       label: `${String(index + 1).padStart(2, "0")}  ${chapter.title || "未命名章节"}`,
       sub: `${state.text}\n${media}`,
       kind: "hub",
-      size: 84,
+      size: 88,
       count: String(index + 1).padStart(2, "0"),
       tone: state.tone,
       ratio: state.ratio,
@@ -109,7 +109,11 @@ function selectNode(node: GraphNode) {
 <template>
   <section class="chapter-graph" aria-label="章节工作流">
     <div class="graph-topline">
-      <span>{{ chapters.length }} 个章节 · 按文稿顺序构建</span>
+      <span class="graph-title"
+        ><i aria-hidden="true"></i>章节关系<span class="graph-count"
+          >{{ chapters.length }} 个节点</span
+        ></span
+      >
       <div class="view-toggle" role="group" aria-label="工作流视图">
         <button
           type="button"
@@ -163,13 +167,28 @@ function selectNode(node: GraphNode) {
       </li>
     </ol>
     <p v-if="chapters.length && view === 'graph'" class="graph-help">
-      每个章节同时管理音频与视频 · 表盘展示当前素材验收进度
+      同一节点管理旁白与画面 · 选中章节查看素材和评论
     </p>
   </section>
 </template>
 
 <style scoped>
+/* Hallmark · atmospheric workbench · sci-fi graph panel.
+ * pre-emit critique: P4 H4 E4 S5 R4 V4 */
 .chapter-graph {
+  --graph-surface: oklch(17% 0.028 263);
+  --graph-panel: oklch(21% 0.034 263);
+  --graph-rule: oklch(33% 0.045 263);
+  --graph-text: oklch(94% 0.018 255);
+  --graph-muted: oklch(73% 0.04 258);
+  --graph-blue: oklch(78% 0.135 233);
+  --graph-violet: oklch(76% 0.14 295);
+  --graph-selected: oklch(28% 0.065 277);
+  --graph-focus: oklch(79% 0.12 238);
+  padding: 16px;
+  color: var(--graph-text);
+  background: var(--graph-surface);
+  color-scheme: dark;
   min-width: 0;
 }
 .graph-topline {
@@ -178,28 +197,30 @@ function selectNode(node: GraphNode) {
   justify-content: space-between;
   gap: 12px;
   padding: 0 0 14px;
-  color: #7a8385;
+  border-bottom: 1px solid var(--graph-rule);
+  margin-bottom: 14px;
+  color: var(--graph-muted);
   font-size: 12px;
 }
 .view-toggle {
   display: flex;
-  border: 1px solid #dbe0de;
+  border: 1px solid var(--graph-rule);
   border-radius: 8px;
   padding: 2px;
-  background: #fff;
+  background: var(--graph-panel);
 }
 .view-toggle button {
   padding: 5px 12px;
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #657071;
+  color: var(--graph-muted);
   cursor: pointer;
   font: inherit;
 }
 .view-toggle button[aria-pressed="true"] {
-  background: #edf3e8;
-  color: #3c5746;
+  background: var(--graph-selected);
+  color: var(--graph-text);
 }
 .graph-scroll {
   max-height: 610px;
@@ -207,7 +228,7 @@ function selectNode(node: GraphNode) {
   border-radius: 14px;
 }
 .graph-help {
-  color: #81898b;
+  color: var(--graph-muted);
   font-size: 11px;
   margin: 12px 0 0;
   line-height: 1.7;
@@ -215,9 +236,9 @@ function selectNode(node: GraphNode) {
 .graph-empty {
   padding: 100px 24px;
   text-align: center;
-  color: #7a8385;
-  background: #f7f9f6;
-  border: 1px dashed #d9dfda;
+  color: var(--graph-muted);
+  background: var(--graph-surface);
+  border: 1px dashed var(--graph-rule);
   border-radius: 14px;
 }
 .graph-chapter-list {
@@ -237,19 +258,19 @@ function selectNode(node: GraphNode) {
   padding: 16px;
   text-align: left;
   font: inherit;
-  border: 1px solid #e1e6e1;
-  background: #fff;
+  border: 1px solid var(--graph-rule);
+  background: var(--graph-panel);
   border-radius: 10px;
-  color: #344840;
+  color: var(--graph-text);
   cursor: pointer;
 }
 .graph-chapter-list button[aria-pressed="true"] {
-  background: #eef4e8;
-  border-color: #83a578;
+  background: var(--graph-selected);
+  border-color: var(--graph-violet);
 }
 .graph-chapter-index {
   font: 12px monospace;
-  color: #788a7d;
+  color: var(--graph-blue);
 }
 .graph-chapter-copy {
   display: flex;
@@ -259,7 +280,7 @@ function selectNode(node: GraphNode) {
   gap: 4px;
 }
 .graph-media-counts {
-  color: #788078;
+  color: var(--graph-muted);
   font-size: 11px;
 }
 .chapter-name {
@@ -269,7 +290,7 @@ function selectNode(node: GraphNode) {
 }
 .chapter-status {
   flex-shrink: 0;
-  color: #788078;
+  color: var(--graph-muted);
   font-size: 11px;
 }
 .chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-text) {
@@ -297,7 +318,132 @@ function selectNode(node: GraphNode) {
   line-height: 1.5;
 }
 button:focus-visible {
-  outline: 2px solid #618765;
+  outline: 2px solid var(--graph-focus);
   outline-offset: 3px;
+}
+
+.graph-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--graph-text);
+}
+.graph-title > i {
+  width: 7px;
+  height: 7px;
+  background: var(--graph-blue);
+  box-shadow: 0 0 9px var(--graph-blue);
+}
+.graph-count {
+  color: var(--graph-muted);
+  font-size: 10px;
+  font-weight: 400;
+  margin-left: 5px;
+  white-space: nowrap;
+}
+.chapter-graph :deep(.rg) {
+  --graph-mode: dark;
+  --graph-ink: 180, 201, 236;
+  --graph-accent: 77, 192, 255;
+  --graph-lime: 172, 139, 255;
+  --graph-danger: 255, 122, 151;
+  --graph-paper: 15, 26, 48;
+  --graph-1: 92, 176, 255;
+  --graph-2: 77, 192, 255;
+  --graph-3: 172, 139, 255;
+  --graph-4: 255, 122, 151;
+  --graph-5: 130, 153, 255;
+  --ink: var(--graph-text);
+  --ink-soft: var(--graph-muted);
+  --ink-faint: var(--graph-muted);
+  --blue: var(--graph-blue);
+  --blue-soft: var(--graph-selected);
+  --lime: var(--graph-violet);
+  --leaf-text: var(--graph-violet);
+  --lime-soft: var(--graph-selected);
+  --red-text: oklch(77% 0.15 10);
+  --red-soft: var(--graph-panel);
+  --surface-solid: var(--graph-surface);
+  --node-bg: var(--graph-panel);
+  --line-strong: var(--graph-rule);
+  --shade: 100, 154, 230;
+  --ambient-a: transparent;
+  --ambient-b: transparent;
+  --glass-line: var(--graph-rule);
+  --pill-bg: var(--graph-panel);
+  --float-bg: var(--graph-panel);
+  --hover-bg: var(--graph-selected);
+  --press-bg: var(--graph-selected);
+  --focus: var(--graph-focus);
+  --edge: none;
+  --e1: none;
+  --e2: none;
+  --e3: none;
+  --float-inset: none;
+  --pill-inset: none;
+  --thread: var(--graph-blue);
+  --thread-active: var(--graph-blue);
+  --pulse-halo: var(--graph-selected);
+  border: 1px solid var(--graph-rule);
+  border-radius: 8px;
+  box-shadow: none;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--graph-rule) 26%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
+    linear-gradient(
+        color-mix(in srgb, var(--graph-rule) 26%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
+    var(--graph-surface);
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-text) {
+  background: var(--graph-surface);
+  border: 1px solid var(--graph-rule);
+  padding: 7px 9px;
+  border-radius: 5px;
+  top: calc(100% + 9px);
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-body) {
+  border-radius: 12px;
+}
+.chapter-graph :deep(.rg-tools) {
+  border-radius: 6px;
+  backdrop-filter: none;
+}
+.chapter-graph :deep(.rg-tools button) {
+  border-radius: 3px;
+}
+.chapter-graph :deep(.rg-node.is-active .rg-label) {
+  color: var(--graph-violet) !important;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-hub.is-active .rg-text) {
+  border-color: var(--graph-violet);
+  background: var(--graph-selected);
+}
+.graph-help {
+  border-top: 1px solid var(--graph-rule);
+  padding-top: 12px;
+  font-size: 10px;
+}
+.graph-scroll {
+  scrollbar-color: var(--graph-rule) var(--graph-surface);
+}
+@media (max-width: 600px) {
+  .chapter-graph {
+    padding: 12px;
+  }
+  .graph-count {
+    display: none;
+  }
+}
+.chapter-graph :deep(.rg-node.is-dim .rg-body) {
+  opacity: 0.65;
 }
 </style>
