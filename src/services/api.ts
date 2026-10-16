@@ -9,6 +9,23 @@ async function request(
   return body;
 }
 export const api = {
+  importFile: (file: File, applyGraph = false) =>
+    request(
+      "/project/import?name=" +
+        encodeURIComponent(file.name) +
+        (applyGraph ? "&applyGraph=true" : ""),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      },
+    ),
+  exportFile: async () => {
+    const response = await fetch("/api/project/export");
+    if (!response.ok)
+      throw new Error((await response.json()).error || "备份失败");
+    return response.blob();
+  },
   load: () => request("/project"),
   save: (project: Project) =>
     request("/project", {
@@ -16,17 +33,17 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(project),
     }),
-  queue: (chapterId: string, data: JobRequest) =>
-    request(`/chapters/${chapterId}/jobs`, {
+  queue: (segmentId: string, data: JobRequest) =>
+    request(`/segments/${segmentId}/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }),
   cancel: (jobId: string) =>
     request(`/jobs/${jobId}/cancel`, { method: "POST" }),
-  upload: (chapterId: string, file: File, options: UploadOptions) =>
+  upload: (segmentId: string, file: File, options: UploadOptions) =>
     request(
-      `/chapters/${chapterId}/assets?${new URLSearchParams({ kind: options.kind, duration: String(options.duration), name: file.name, ...(options.jobId ? { jobId: options.jobId } : {}) })}`,
+      `/segments/${segmentId}/assets?${new URLSearchParams({ kind: options.kind, duration: String(options.duration), name: file.name, ...(options.jobId ? { jobId: options.jobId } : {}) })}`,
       {
         method: "POST",
         headers: { "Content-Type": file.type || "application/octet-stream" },

@@ -20,7 +20,7 @@ export interface ReviewComment {
 }
 export interface GenerationJob {
   id: string;
-  chapterId: string;
+  segmentId: string;
   kind: MediaKind;
   status: "awaiting_external" | "completed" | "cancelled";
   textSnapshot: string;
@@ -38,9 +38,11 @@ export interface GenerationJob {
     resolved?: boolean;
   }[];
 }
-export interface Chapter {
+export interface Segment {
   id: string;
   title: string;
+  enabled: boolean;
+  derivedFromId?: string;
   text: string;
   direction: string;
   gain: number;
@@ -51,7 +53,20 @@ export interface Chapter {
   versions: AssetVersion[];
   comments: ReviewComment[];
 }
+export interface Chapter {
+  id: string;
+  title: string;
+  segments: Segment[];
+}
+export interface GraphConfig {
+  layout: "chapter-segments";
+  theme: "scifi";
+  columnWidth: number;
+  rowGap: number;
+}
 export interface Project {
+  schemaVersion: 2;
+  graph: GraphConfig;
   id: string;
   title: string;
   revision: number;

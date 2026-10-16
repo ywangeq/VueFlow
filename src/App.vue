@@ -3,16 +3,22 @@ import { computed, onMounted, ref } from "vue";
 import type { Project, MediaKind, Chapter } from "./domain/types";
 import {
   activeVersion,
-  chapterStatus,
+  segmentStatus,
+  flattenSegments,
+  findSegment,
+  chapterForSegment,
+  groupStatus,
+  newSegment,
   combinedChapterStatus,
-  chapterDuration,
+  segmentDuration,
   newChapter,
   formatTime,
 } from "./domain/project";
+import { splitSegment } from "./domain/script";
 import { api } from "./services/api";
 import { probeMedia, exportAudio, downloadBlob } from "./services/media";
 import ChapterGraph from "./components/ChapterGraph.vue";
-import ChapterInspector from "./components/ChapterInspector.vue";
+import SegmentInspector from "./components/SegmentInspector.vue";
 import SequencePlayer from "./components/SequencePlayer.vue";
 import StudioIcon from "./components/StudioIcon.vue";
 import ScriptImport from "./components/ScriptImport.vue";
@@ -24,41 +30,51 @@ const busy = ref(false),
   notice = ref(""),
   loaded = ref(false);
 const importing = ref(false);
+const scopeChapterId = ref<string | null>(null);
 const playhead = ref<{
-  chapterId: string;
+  segmentId: string;
   time: number;
   versionId: string;
 } | null>(null);
-const chapter = computed(
-  () => project.value?.chapters.find((c) => c.id === selectedId.value) ?? null,
+const segment = computed(() =>
+  project.value && selectedId.value
+    ? findSegment(project.value, selectedId.value)
+    : null,
+);
+const chapter = computed(() =>
+  project.value && selectedId.value
+    ? chapterForSegment(project.value, selectedId.value)
+    : null,
+);
+const segments = computed(() =>
+  project.value ? flattenSegments(project.value) : [],
 );
 const approved = computed(
   () =>
-    project.value?.chapters.filter((c) => combinedChapterStatus(c) === "已通过")
+    segments.value.filter((c) => combinedChapterStatus(c) === "已通过")
       .length ?? 0,
 );
 const available = computed(
   () =>
-    project.value?.chapters.filter(
+    segments.value.filter(
       (c) => activeVersion(c, "audio") || activeVersion(c, "video"),
     ).length ?? 0,
 );
 const duration = computed(() => {
   const playable =
-    project.value?.chapters.filter(
+    segments.value.filter(
       (c) => activeVersion(c, "audio") || activeVersion(c, "video"),
     ) ?? [];
   return playable.reduce(
     (sum, c, i) =>
-      sum + chapterDuration(c) + (i < playable.length - 1 ? c.gap : 0),
+      sum + segmentDuration(c) + (i < playable.length - 1 ? c.gap : 0),
     0,
   );
 });
 const approvedAudio = computed(
   () =>
-    project.value?.chapters.filter(
-      (c) => chapterStatus(c, "audio") === "已通过",
-    ).length ?? 0,
+    segments.value.filter((c) => segmentStatus(c, "audio") === "已通过")
+      .length ?? 0,
 );
 const pendingCount = computed(
   () =>
@@ -68,8 +84,16 @@ const pendingCount = computed(
 function accept(next: Project) {
   project.value = next;
   dirty.value = false;
-  if (!next.chapters.some((c) => c.id === selectedId.value))
-    selectedId.value = next.chapters[0]?.id ?? null;
+  if (!selectedId.value || !findSegment(next, selectedId.value))
+    selectedId.value =
+      flattenSegments(next)[0]?.id ??
+      flattenSegments(next, true)[0]?.id ??
+      null;
+  if (
+    scopeChapterId.value &&
+    !next.chapters.some((c) => c.id === scopeChapterId.value)
+  )
+    scopeChapterId.value = null;
 }
 function markDirty() {
   dirty.value = true;
@@ -110,7 +134,8 @@ function importScript(chapters: Chapter[]) {
     return;
   }
   project.value.chapters.push(...chapters);
-  selectedId.value = chapters[0]?.id ?? selectedId.value;
+  selectedId.value = chapters[0]?.segments[0]?.id ?? selectedId.value;
+  scopeChapterId.value = chapters[0]?.id ?? null;
   importing.value = false;
   markDirty();
   save();
@@ -134,9 +159,14 @@ function recoverDraft() {
 }
 function addChapter() {
   if (!project.value) return;
+  if (project.value.chapters.length >= 200) {
+    error.value = "一个工程最多200章。";
+    return;
+  }
   const c = newChapter(project.value.chapters.length + 1);
   project.value.chapters.push(c);
-  selectedId.value = c.id;
+  selectedId.value = c.segments[0]?.id ?? null;
+  scopeChapterId.value = c.id;
   markDirty();
   save();
 }
@@ -178,7 +208,7 @@ function upload(file: File, mediaKind: MediaKind, jobId?: string) {
       jobId,
     });
     accept(next);
-    const imported = next.chapters.find((c) => c.id === id);
+    const imported = findSegment(next, id);
     const completed = jobId
       ? next.jobs.find((j) => j.id === jobId)?.completedVersionId
       : null;
@@ -202,21 +232,8 @@ function exportProject() {
   run(async () => {
     await flush();
     if (!project.value) return;
-    downloadBlob(
-      new Blob(
-        [
-          JSON.stringify(
-            { format: "vueflow-project/v1", project: project.value },
-            null,
-            2,
-          ),
-        ],
-        { type: "application/json" },
-      ),
-      "vueflow-project.json",
-    );
-    notice.value =
-      "已导出工程元数据；音视频文件保存在本机 data/media，备份时需一并保存。";
+    downloadBlob(await api.exportFile(), "vueflow-project.zip");
+    notice.value = "工程包已导出，包含配置、任务、评论和全部音视频文件。";
   });
 }
 function handoff() {
@@ -225,12 +242,13 @@ function handoff() {
     if (!project.value) return;
     const p = project.value;
     const jobs = p.jobs.filter((j) => j.status === "awaiting_external");
-    if (!jobs.length) throw new Error("请先选择章节，创建一个生成或返修任务。");
+    if (!jobs.length) throw new Error("请先选择句段，创建一个生成或返修任务。");
     const tasks = jobs.map((j) => {
-      const c = p.chapters.find((c) => c.id === j.chapterId);
+      const c = findSegment(p, j.segmentId);
       return {
         ...j,
-        chapterTitle: c?.title,
+        chapterTitle: chapterForSegment(p, j.segmentId)?.title,
+        segmentTitle: c?.title,
         comments:
           ("commentSnapshots" in j
             ? j.commentSnapshots
@@ -244,12 +262,12 @@ function handoff() {
         [
           JSON.stringify(
             {
-              format: "vueflow-handoff/v1",
+              format: "vueflow-handoff/v2",
               projectId: p.id,
               revision: p.revision,
               execution: "manual-external",
               instructions:
-                "按任务快照在已授权工具中生成；MiniMax 仅使用已有本人音色和网页额度，不切换API。完成后通过对应章节任务导入文件。保留任务ID与基线版本，过期结果不自动激活。",
+                "按任务快照在已授权工具中生成；MiniMax 仅使用已有本人音色和网页额度，不切换API。完成后通过对应句段任务导入文件。保留任务ID与基线版本，过期结果不自动激活。",
               tasks,
             },
             null,
@@ -263,6 +281,115 @@ function handoff() {
     notice.value = `已导出 ${jobs.length} 个待执行任务；尚未调用 MiniMax 或视频服务。`;
   });
 }
+
+function selectGroup(id: string | null) {
+  scopeChapterId.value = id;
+  if (id)
+    selectedId.value =
+      project.value?.chapters
+        .find((c) => c.id === id)
+        ?.segments.find((s) => s.enabled)?.id ??
+      project.value?.chapters.find((c) => c.id === id)?.segments[0]?.id ??
+      null;
+}
+function selectSegment(id: string) {
+  selectedId.value = id;
+  scopeChapterId.value = project.value
+    ? (chapterForSegment(project.value, id)?.id ?? null)
+    : null;
+}
+function addSegment() {
+  if (!chapter.value || !project.value) return;
+  if (
+    chapter.value.segments.length >= 2000 ||
+    flattenSegments(project.value, true).length >= 5000
+  ) {
+    error.value = "句段已达工程上限，请拆分工程。";
+    return;
+  }
+  const item = newSegment(chapter.value.segments.length + 1);
+  chapter.value.segments.push(item);
+  selectedId.value = item.id;
+  markDirty();
+  save();
+}
+function moveSegment(id: string, delta: number) {
+  if (!project.value) return;
+  const group = chapterForSegment(project.value, id);
+  if (!group) return;
+  const i = group.segments.findIndex((s) => s.id === id),
+    j = i + delta;
+  if (j < 0 || j >= group.segments.length) return;
+  [group.segments[i], group.segments[j]] = [
+    group.segments[j],
+    group.segments[i],
+  ];
+  markDirty();
+  save();
+}
+function splitSelected() {
+  const id = selectedId.value;
+  if (!id) return;
+  run(async () => {
+    await flush();
+    if (!project.value) return;
+    const original = findSegment(project.value, id),
+      group = chapterForSegment(project.value, id);
+    if (!original || !group) return;
+    if (
+      project.value.jobs.some(
+        (j) => j.segmentId === original.id && j.status === "awaiting_external",
+      )
+    )
+      throw new Error("请先取消此句段的待执行任务，再拆分。");
+    const items = splitSegment(original);
+    if (items.length === 1) {
+      notice.value = "当前只有一句，无需拆分。";
+      return;
+    }
+    const at = group.segments.findIndex((s) => s.id === original.id);
+    group.segments.splice(at, 1, ...items);
+    selectedId.value = items[1].id;
+    markDirty();
+    await flush();
+    notice.value =
+      "已拆成独立句段。原稿和素材已保留并停用；现有音视频不会自动切割。";
+  });
+}
+function toggleSelected() {
+  const id = selectedId.value;
+  if (!id) return;
+  run(async () => {
+    await flush();
+    if (!project.value) return;
+    const target = findSegment(project.value, id);
+    if (!target) return;
+    if (
+      project.value.jobs.some(
+        (j) => j.segmentId === id && j.status === "awaiting_external",
+      )
+    )
+      throw new Error("请先取消此句段的待执行任务。");
+    target.enabled = !target.enabled;
+    markDirty();
+    await flush();
+  });
+}
+function importFile(file: File, applyGraph: boolean) {
+  run(async () => {
+    await flush();
+    const existingIds = new Set(project.value?.chapters.map((c) => c.id));
+    const next = await api.importFile(file, applyGraph);
+    accept(next);
+    selectGroup(
+      next.chapters.find((c) => !existingIds.has(c.id))?.id ??
+        scopeChapterId.value,
+    );
+    importing.value = false;
+    notice.value = "文件已导入并追加到工程；原有内容保留。";
+  });
+}
+
 onMounted(load);
 window.addEventListener("beforeunload", (event) => {
   if (dirty.value) {
@@ -291,6 +418,9 @@ window.addEventListener("beforeunload", (event) => {
         }}</span>
       </div>
       <div class="header-actions">
+        <button class="secondary" :disabled="busy" @click="importing = true">
+          <StudioIcon name="upload" />导入
+        </button>
         <button class="secondary" :disabled="busy" @click="exportProject">
           <StudioIcon name="download" />工程备份</button
         ><button class="primary" :disabled="busy || !dirty" @click="save">
@@ -348,12 +478,12 @@ window.addEventListener("beforeunload", (event) => {
           <li
             v-for="(c, index) in project.chapters"
             :key="c.id"
-            :class="{ selected: c.id === selectedId }"
+            :class="{ selected: c.id === scopeChapterId }"
           >
             <button
               class="chapter-select"
-              :aria-current="c.id === selectedId ? 'step' : undefined"
-              @click="selectedId = c.id"
+              :aria-current="c.id === scopeChapterId ? 'step' : undefined"
+              @click="selectGroup(c.id)"
             >
               <span class="chapter-index">{{
                 String(index + 1).padStart(2, "0")
@@ -364,13 +494,53 @@ window.addEventListener("beforeunload", (event) => {
                   ><span
                     class="tiny-dot"
                     :class="{
-                      'is-approved': combinedChapterStatus(c) === '已通过',
+                      'is-approved': groupStatus(c) === '已通过',
                     }"
                   ></span
-                  >{{ combinedChapterStatus(c) }}</small
+                  >{{ groupStatus(c) }} ·
+                  {{ c.segments.filter((s) => s.enabled).length }} 句</small
                 ></span
               >
             </button>
+            <ol v-if="scopeChapterId === c.id" class="segment-list">
+              <li
+                v-for="(item, si) in c.segments"
+                :key="item.id"
+                :class="{
+                  'selected-segment': item.id === selectedId,
+                  'disabled-segment': !item.enabled,
+                }"
+              >
+                <button class="segment-select" @click="selectSegment(item.id)">
+                  <strong>{{ item.title }}</strong
+                  ><small
+                    >{{
+                      !item.enabled
+                        ? "原稿 · 已停用"
+                        : combinedChapterStatus(item)
+                    }}
+                    · {{ item.text.slice(0, 24) || "待写文稿" }}</small
+                  >
+                </button>
+                <div>
+                  <button
+                    class="text-button"
+                    :disabled="busy || si === 0"
+                    :aria-label="'上移句段' + item.title"
+                    @click="moveSegment(item.id, -1)"
+                  >
+                    ↑</button
+                  ><button
+                    class="text-button"
+                    :disabled="busy || si === c.segments.length - 1"
+                    :aria-label="'下移句段' + item.title"
+                    @click="moveSegment(item.id, 1)"
+                  >
+                    ↓
+                  </button>
+                </div>
+              </li>
+            </ol>
             <div class="chapter-reorder">
               <button
                 class="icon-button tiny"
@@ -391,11 +561,48 @@ window.addEventListener("beforeunload", (event) => {
           </li>
         </ol>
         <button class="outline-add" :disabled="busy" @click="importing = true">
-          <StudioIcon name="upload" :size="16" />按章节导入文稿
+          <StudioIcon name="upload" :size="16" />导入文稿 / 工程文件
         </button>
         <button class="outline-add" :disabled="busy" @click="addChapter">
           <StudioIcon name="plus" :size="16" />添加章节
         </button>
+        <button
+          class="outline-add"
+          :disabled="busy || !chapter"
+          @click="addSegment"
+        >
+          <StudioIcon name="plus" :size="16" />当前章节添加句段
+        </button>
+        <label v-if="chapter" class="chapter-title-edit"
+          >章节名称<input
+            v-model="chapter.title"
+            :disabled="busy"
+            maxlength="120"
+            @input="markDirty"
+            @change="save"
+        /></label>
+        <details class="graph-settings">
+          <summary>图谱配置</summary>
+          <label
+            >列间距<input
+              type="number"
+              min="160"
+              max="640"
+              v-model.number="project.graph.columnWidth"
+              :disabled="busy"
+              @input="markDirty"
+              @change="save" /></label
+          ><label
+            >行间距<input
+              type="number"
+              min="80"
+              max="600"
+              v-model.number="project.graph.rowGap"
+              :disabled="busy"
+              @input="markDirty"
+              @change="save" /></label
+          ><small>播放顺序遵循左侧章节、句段顺序。</small>
+        </details>
         <div class="outline-bottom">
           <div>
             <span class="muted">待执行任务</span
@@ -421,17 +628,19 @@ window.addEventListener("beforeunload", (event) => {
           </div>
           <div class="progress-label">
             <strong
-              >{{ approved
-              }}<span>/ {{ project.chapters.length }}</span></strong
-            ><span>章节已通过</span>
+              >{{ approved }}<span>/ {{ segments.length }}</span></strong
+            ><span>句段已通过</span>
           </div>
         </div>
         <div class="stage-wrap">
           <ChapterGraph
             :chapters="project.chapters"
-            :selected-id="selectedId"
+            :selected-segment-id="selectedId"
+            :scope-chapter-id="scopeChapterId"
+            :graph="project.graph"
             :project-title="project.title"
-            @select="selectedId = $event"
+            @select-segment="selectSegment"
+            @select-chapter="selectGroup"
           />
         </div>
         <div class="canvas-summary">
@@ -446,14 +655,12 @@ window.addEventListener("beforeunload", (event) => {
           <div class="sequence-heading">
             <div>
               <h2>音画连续预览</h2>
-              <p>同一章节的旁白与画面共用播放进度，按章节顺序衔接。</p>
+              <p>同一句段的旁白与画面共用进度，按章节、句段顺序衔接。</p>
             </div>
             <button
               class="secondary small"
               :disabled="
-                busy ||
-                approvedAudio !== project.chapters.length ||
-                !project.chapters.length
+                busy || approvedAudio !== segments.length || !segments.length
               "
               @click="exportMix"
             >
@@ -462,7 +669,7 @@ window.addEventListener("beforeunload", (event) => {
           </div>
           <SequencePlayer
             :project="project"
-            @select="selectedId = $event"
+            @select="selectSegment"
             @time="playhead = $event"
           /><label class="master-volume"
             >总音量
@@ -481,13 +688,16 @@ window.addEventListener("beforeunload", (event) => {
           >
         </section>
       </main>
-      <ChapterInspector
-        v-if="chapter"
-        :key="chapter.id"
-        :chapter="chapter"
+      <SegmentInspector
+        v-if="segment"
+        :key="segment.id"
+        :segment="segment"
+        :chapter-title="chapter?.title ?? ''"
         :project="project"
         :busy="busy"
         :playhead="playhead"
+        @split="splitSelected"
+        @toggle="toggleSelected"
         @dirty="markDirty"
         @save="save"
         @upload="upload"
@@ -501,8 +711,11 @@ window.addEventListener("beforeunload", (event) => {
     </div>
     <ScriptImport
       v-if="importing"
+      :error="error"
+      :busy="busy"
       @close="importing = false"
       @import="importScript"
+      @file="importFile"
     />
   </div>
   <div v-else class="loading-screen">

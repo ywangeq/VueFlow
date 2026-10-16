@@ -3,6 +3,15 @@ import { promises as fs, createReadStream } from "node:fs";
 import { resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_GRAPH,
+  migrateProject,
+  validateProjectDocument,
+  parseImport,
+  appendImportedProject,
+  createProjectArchive,
+} from "../shared/project-format.mjs";
+export { migrateProject } from "../shared/project-format.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_JSON = 2 * 1024 * 1024;
@@ -32,8 +41,10 @@ const now = () => new Date().toISOString();
 const isLocal = (hostname) =>
   ["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname);
 
+const allSegments = (project) =>
+  project.chapters.flatMap((chapter) => chapter.segments);
 function initialProject() {
-  return {
+  return migrateProject({
     id: randomUUID(),
     title: "我的音视频工作台",
     revision: 0,
@@ -57,7 +68,7 @@ function initialProject() {
       versions: [],
       comments: [],
     })),
-  };
+  });
 }
 
 async function readBody(req, limit) {
@@ -78,7 +89,7 @@ async function json(req) {
     fail(400, "无效 JSON");
   }
 }
-function mediaFormat(bytes, requestedKind) {
+export function mediaFormat(bytes, requestedKind) {
   const starts = (text) =>
     bytes.subarray(0, text.length).toString("latin1") === text;
   if (requestedKind === "audio") {
@@ -147,80 +158,129 @@ function mediaFormat(bytes, requestedKind) {
   fail(415, "文件内容不是受支持的音视频格式，或与所选类型不符");
 }
 
-function sanitizeProject(input, current) {
-  if (!input || input.revision !== current.revision)
+export function sanitizeProject(input, current) {
+  if (!input || input.schemaVersion !== 2)
+    fail(400, "需要 schemaVersion 2 工程");
+  if (input.revision !== current.revision)
     fail(409, "工程已更新，请重新载入后再保存");
   if (!Array.isArray(input.chapters) || input.chapters.length > 200)
     fail(400, "章节数量超出限制");
+  if (
+    !input.graph ||
+    input.graph.layout !== "chapter-segments" ||
+    input.graph.theme !== "scifi"
+  )
+    fail(400, "图配置不受支持");
+  const graph = {
+    layout: "chapter-segments",
+    theme: "scifi",
+    columnWidth: number(input.graph.columnWidth, 160, 640, "图列宽"),
+    rowGap: number(input.graph.rowGap, 80, 600, "图行距"),
+  };
   const seen = new Set();
   const commentIds = new Set();
-  const chapters = input.chapters.map((ch) => {
-    if (!ch || typeof ch !== "object") fail(400, "无效章节");
-    const chapterId = id(ch.id);
-    if (seen.has(chapterId)) fail(400, "章节 ID 重复");
-    seen.add(chapterId);
-    const existing = current.chapters.find((c) => c.id === chapterId);
-    const versions = existing?.versions || [];
-    const active = (value, type) =>
-      value === null
-        ? null
-        : versions.some((v) => v.id === value && v.kind === type)
-          ? value
-          : fail(400, "素材版本不存在");
-    if (!Array.isArray(ch.comments) || ch.comments.length > 1000)
-      fail(400, "评论数量超出限制");
-    if (
-      !Array.isArray(ch.approvedVersionIds) ||
-      ch.approvedVersionIds.some((v) => !versions.some((x) => x.id === v))
-    )
-      fail(400, "验收版本不存在");
-    for (const versionId of ch.approvedVersionIds) {
-      if (existing?.approvedVersionIds.includes(versionId)) continue;
-      const version = versions.find((v) => v.id === versionId);
+  let segmentCount = 0;
+  const chapters = input.chapters.map((group) => {
+    if (!group || typeof group !== "object") fail(400, "无效章节");
+    const groupId = id(group.id);
+    if (seen.has(groupId)) fail(400, "章节或片段 ID 重复");
+    seen.add(groupId);
+    if (!Array.isArray(group.segments) || group.segments.length > 2000)
+      fail(400, "片段数量超出限制");
+    segmentCount += group.segments.length;
+    if (segmentCount > 5000) fail(400, "工程片段数量超出限制");
+    const segments = group.segments.map((ch) => {
+      if (!ch || typeof ch !== "object") fail(400, "无效章节");
+      const chapterId = id(ch.id);
+      if (seen.has(chapterId)) fail(400, "章节 ID 重复");
+      seen.add(chapterId);
+      const existing = allSegments(current).find((c) => c.id === chapterId);
+      const versions = existing?.versions || [];
+      const active = (value, type) =>
+        value === null
+          ? null
+          : versions.some((v) => v.id === value && v.kind === type)
+            ? value
+            : fail(400, "素材版本不存在");
+      if (!Array.isArray(ch.comments) || ch.comments.length > 1000)
+        fail(400, "评论数量超出限制");
       if (
-        version.textSnapshot !== ch.text ||
-        version.directionSnapshot !== ch.direction
+        !Array.isArray(ch.approvedVersionIds) ||
+        ch.approvedVersionIds.some((v) => !versions.some((x) => x.id === v))
       )
-        fail(409, "素材对应旧文稿或旧表演要求，不能验收");
-    }
-    return {
-      id: chapterId,
-      title: str(ch.title, 200, "章节标题"),
-      text: str(ch.text, 100000, "文稿"),
-      direction: str(ch.direction, 10000, "表演要求"),
-      gain: number(ch.gain, 0, 1, "音量"),
-      gap: number(ch.gap, 0, 30, "停顿"),
-      activeAudioId: active(ch.activeAudioId, "audio"),
-      activeVideoId: active(ch.activeVideoId, "video"),
-      approvedVersionIds: [...new Set(ch.approvedVersionIds)],
-      versions,
-      comments: ch.comments.map((c) => {
-        if (!c || typeof c !== "object") fail(400, "无效评论");
-        const commentId = id(c.id);
-        if (commentIds.has(commentId)) fail(400, "评论 ID 重复");
-        commentIds.add(commentId);
-        if (c.versionId !== null && !versions.some((v) => v.id === c.versionId))
-          fail(400, "评论素材不存在");
-        const previous = existing?.comments.find((old) => old.id === commentId);
-        return {
-          id: commentId,
-          text: str(c.text, 10000, "评论"),
-          time: number(c.time, 0, 86400, "评论时间"),
-          versionId: c.versionId,
-          resolved: c.resolved === true,
-          createdAt: previous?.createdAt || now(),
-        };
-      }),
-    };
+        fail(400, "验收版本不存在");
+      for (const versionId of ch.approvedVersionIds) {
+        if (existing?.approvedVersionIds.includes(versionId)) continue;
+        const version = versions.find((v) => v.id === versionId);
+        if (
+          version.textSnapshot !== ch.text ||
+          version.directionSnapshot !== ch.direction
+        )
+          fail(409, "素材对应旧文稿或旧表演要求，不能验收");
+      }
+      return {
+        id: chapterId,
+        enabled:
+          typeof ch.enabled === "boolean"
+            ? ch.enabled
+            : fail(400, "片段启用状态无效"),
+        ...(ch.derivedFromId ? { derivedFromId: id(ch.derivedFromId) } : {}),
+        title: str(ch.title, 200, "章节标题"),
+        text: str(ch.text, 100000, "文稿"),
+        direction: str(ch.direction, 10000, "表演要求"),
+        gain: number(ch.gain, 0, 1, "音量"),
+        gap: number(ch.gap, 0, 30, "停顿"),
+        activeAudioId: active(ch.activeAudioId, "audio"),
+        activeVideoId: active(ch.activeVideoId, "video"),
+        approvedVersionIds: [...new Set(ch.approvedVersionIds)],
+        versions,
+        comments: ch.comments.map((c) => {
+          if (!c || typeof c !== "object") fail(400, "无效评论");
+          const commentId = id(c.id);
+          if (commentIds.has(commentId)) fail(400, "评论 ID 重复");
+          commentIds.add(commentId);
+          if (
+            c.versionId !== null &&
+            !versions.some((v) => v.id === c.versionId)
+          )
+            fail(400, "评论素材不存在");
+          const previous = existing?.comments.find(
+            (old) => old.id === commentId,
+          );
+          return {
+            id: commentId,
+            text: str(c.text, 10000, "评论"),
+            time: number(c.time, 0, 86400, "评论时间"),
+            versionId: c.versionId,
+            resolved: c.resolved === true,
+            createdAt: previous?.createdAt || now(),
+          };
+        }),
+      };
+    });
+    return { id: groupId, title: str(group.title, 200, "章节标题"), segments };
   });
+  const segments = chapters.flatMap((c) => c.segments);
+  for (const segment of segments) {
+    if (
+      segment.derivedFromId &&
+      (segment.derivedFromId === segment.id ||
+        !segments.some((s) => s.id === segment.derivedFromId))
+    )
+      fail(400, "片段来源必须引用工程中的其他片段");
+  }
   if (
     current.jobs.some(
-      (j) => j.status === "awaiting_external" && !seen.has(j.chapterId),
+      (j) =>
+        j.status === "awaiting_external" &&
+        !segments.some((s) => s.id === j.segmentId && s.enabled),
     )
   )
-    fail(409, "请先取消章节的待执行任务");
+    fail(409, "请先取消片段的待执行任务，才能停用或删除");
   return {
     ...current,
+    schemaVersion: 2,
+    graph,
     title: str(input.title, 200, "工程标题"),
     masterGain: number(input.masterGain, 0, 1, "总音量"),
     chapters,
@@ -235,7 +295,30 @@ export async function createStudioServer({
   const projectPath = join(dataDir, "project.json");
   let project;
   try {
-    project = JSON.parse(await fs.readFile(projectPath, "utf8"));
+    const original = await fs.readFile(projectPath, "utf8");
+    const stored = JSON.parse(original);
+    project = migrateProject(stored);
+    if (stored.schemaVersion !== 2) {
+      try {
+        await fs.writeFile(`${projectPath}.v1.bak`, original, { flag: "wx" });
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        if ((await fs.readFile(`${projectPath}.v1.bak`, "utf8")) !== original)
+          await fs.writeFile(
+            `${projectPath}.v1.${randomUUID()}.bak`,
+            original,
+            { flag: "wx" },
+          );
+      }
+      const temporary = `${projectPath}.${randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(temporary, JSON.stringify(project, null, 2));
+        await fs.rename(temporary, projectPath);
+      } catch (error) {
+        await fs.rm(temporary, { force: true });
+        throw error;
+      }
+    }
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     project = initialProject();
@@ -248,6 +331,12 @@ export async function createStudioServer({
     return next;
   };
   async function persist(next) {
+    try {
+      validateProjectDocument(next);
+    } catch (error) {
+      if (!error.status) error.status = 400;
+      throw error;
+    }
     next.revision = project.revision + 1;
     next.updatedAt = now();
     const temporary = `${projectPath}.${randomUUID()}.tmp`;
@@ -290,27 +379,129 @@ export async function createStudioServer({
         fail(403, "禁止跨站请求");
       const url = new URL(req.url, host);
       const path = url.pathname;
+      if (path.startsWith("/api/chapters/")) {
+        res.setHeader("Deprecation", "true");
+        res.setHeader(
+          "Warning",
+          '299 - "Use /api/segments/:id; chapter leaf adapter expires after v1 migration release"',
+        );
+      }
       if (path === "/api/project" && req.method === "GET") {
         await tail;
         respond(200, project);
         return;
       }
+      if (path === "/api/project/export" && req.method === "GET") {
+        await tail;
+
+        let archive;
+        try {
+          archive = await createProjectArchive(
+            copy(project),
+            async (mediaUrl) => {
+              if (
+                !/^\/media\/[a-f0-9-]{36}\.(wav|mp3|flac|ogg|mp4|m4a|webm)$/.test(
+                  mediaUrl,
+                )
+              )
+                fail(400, "工程包含不安全的素材引用");
+              try {
+                return await fs.readFile(join(dataDir, mediaUrl));
+              } catch (error) {
+                if (error.code === "ENOENT")
+                  fail(404, "工程素材文件缺失，无法导出完整备份");
+                throw error;
+              }
+            },
+          );
+        } catch (error) {
+          if (!error.status) error.status = 400;
+          throw error;
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/zip",
+          "Content-Disposition": 'attachment; filename="vueflow-project.zip"',
+          "Content-Length": archive.byteLength,
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        });
+        res.end(Buffer.from(archive));
+        return;
+      }
+      if (path === "/api/project/import" && req.method === "POST") {
+        const bytes = await readBody(req, MAX_MEDIA);
+        const name = str(
+          url.searchParams.get("name") || "project.json",
+          250,
+          "文件名",
+        );
+        const result = await serial(async () => {
+          const written = [];
+          try {
+            const imported = await parseImport(bytes, name, {
+              detectMedia: (bytes, kind) =>
+                mediaFormat(Buffer.from(bytes), kind),
+            });
+            let total = 0;
+            const next = await appendImportedProject(
+              copy(project),
+              imported.project,
+              imported.media,
+              {
+                applyGraph: url.searchParams.get("applyGraph") === "true",
+                detectMedia: (bytes, kind) =>
+                  mediaFormat(Buffer.from(bytes), kind),
+                saveMedia: async ({ bytes: mediaBytes, kind: mediaKind }) => {
+                  total += mediaBytes.byteLength;
+                  if (total > MAX_MEDIA)
+                    fail(413, "导入素材总量超出 256 MiB 限制");
+                  const [extension] = mediaFormat(
+                    Buffer.from(mediaBytes),
+                    kind(mediaKind),
+                  );
+                  const filename = `${randomUUID()}.${extension}`;
+                  const mediaPath = join(dataDir, "media", filename);
+                  await fs.writeFile(mediaPath, mediaBytes, { flag: "wx" });
+                  written.push(mediaPath);
+                  return `/media/${filename}`;
+                },
+              },
+            );
+            validateProjectDocument(next);
+            const sanitized = sanitizeProject(next, next);
+            return await persist(sanitized);
+          } catch (error) {
+            await Promise.all(
+              written.map((file) => fs.rm(file, { force: true })),
+            );
+            if (!error.status) error.status = 400;
+            throw error;
+          }
+        });
+        respond(200, result);
+        return;
+      }
       if (path.startsWith("/api/")) {
         const body =
           req.method === "PUT" || /\/jobs$/.test(path) ? await json(req) : null;
-        const uploadMatch = path.match(/^\/api\/chapters\/([\w-]+)\/assets$/);
+        const uploadMatch = path.match(
+          /^\/api\/(?:segments|chapters)\/([\w-]+)\/assets$/,
+        );
         const bytes = uploadMatch ? await readBody(req, MAX_MEDIA) : null;
         const result = await serial(async () => {
           if (path === "/api/project" && req.method === "PUT")
             return persist(sanitizeProject(body, project));
           const next = copy(project);
-          const jobMatch = path.match(/^\/api\/chapters\/([\w-]+)\/jobs$/);
+          const jobMatch = path.match(
+            /^\/api\/(?:segments|chapters)\/([\w-]+)\/jobs$/,
+          );
           if ((jobMatch || uploadMatch) && req.method === "POST") {
-            const chapter = next.chapters.find(
+            const chapter = allSegments(next).find(
               (c) => c.id === (jobMatch || uploadMatch)[1],
             );
-            if (!chapter) fail(404, "章节不存在");
+            if (!chapter) fail(404, "片段不存在");
             if (jobMatch) {
+              if (!chapter.enabled) fail(409, "停用片段不能创建生成任务");
               if (!body || typeof body !== "object") fail(400, "无效任务");
               if (!chapter.text.trim()) fail(400, "请先填写文稿再创建生成任务");
               const mediaKind = kind(body.kind);
@@ -351,7 +542,7 @@ export async function createStudioServer({
                 };
               });
               const snapshot = {
-                chapterId: chapter.id,
+                segmentId: chapter.id,
                 kind: mediaKind,
                 textSnapshot: chapter.text,
                 directionSnapshot: chapter.direction,
@@ -398,7 +589,7 @@ export async function createStudioServer({
               ? next.jobs.find(
                   (j) =>
                     j.id === jobId &&
-                    j.chapterId === chapter.id &&
+                    j.segmentId === chapter.id &&
                     j.kind === mediaKind,
                 )
               : null;

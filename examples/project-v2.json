@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "id": "example_project",
+  "title": "可直接导入的音视频图谱示例",
+  "revision": 0,
+  "masterGain": 1,
+  "updatedAt": "2026-10-16T07:52:00.326Z",
+  "graph": {
+    "layout": "chapter-segments",
+    "theme": "scifi",
+    "columnWidth": 220,
+    "rowGap": 180
+  },
+  "chapters": [
+    {
+      "id": "chapter_1",
+      "title": "开场",
+      "segments": [
+        {
+          "id": "segment_1_1",
+          "title": "片段 1",
+          "text": "先有一个想法。",
+          "direction": "自然聊天，按语义停顿。",
+          "enabled": true,
+          "gain": 1,
+          "gap": 0.4,
+          "approvedVersionIds": [],
+          "activeAudioId": null,
+          "activeVideoId": null,
+          "versions": [],
+          "comments": []
+        },
+        {
+          "id": "segment_1_2",
+          "title": "片段 2",
+          "text": "再把它变成作品！",
+          "direction": "自然聊天，按语义停顿。",
+          "enabled": true,
+          "gain": 1,
+          "gap": 0.4,
+          "approvedVersionIds": [],
+          "activeAudioId": null,
+          "activeVideoId": null,
+          "versions": [],
+          "comments": []
+        }
+      ]
+    },
+    {
+      "id": "chapter_2",
+      "title": "制作过程",
+      "segments": [
+        {
+          "id": "segment_2_1",
+          "title": "片段 1",
+          "text": "每一章都可以放入旁白和画面。",
+          "direction": "自然聊天，按语义停顿。",
+          "enabled": true,
+          "gain": 1,
+          "gap": 0.4,
+          "approvedVersionIds": [],
+          "activeAudioId": null,
+          "activeVideoId": null,
+          "versions": [],
+          "comments": []
+        }
+      ]
+    }
+  ],
+  "jobs": []
+}

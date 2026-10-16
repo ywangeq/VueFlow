@@ -41,3 +41,5 @@ uses the [GSAP standard license](https://gsap.com/standard-license), rather than
 MIT. Those upstream terms remain applicable. See installed package
 license files for the complete notices; the application license does not
 relicense these dependencies.
+
+Ajv 8.17.1 (JSON Schema validation) and fflate 0.8.2 (portable ZIP archives) are MIT licensed. Their installed package LICENSE files retain the upstream notices.

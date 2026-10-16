@@ -2,17 +2,31 @@
 import { ref, computed, onMounted } from "vue";
 import { splitScript } from "../domain/script";
 import type { Chapter } from "../domain/types";
+import example from "../../examples/project-v2.json";
+import { downloadBlob } from "../services/media";
 import StudioIcon from "./StudioIcon.vue";
-const emit = defineEmits<{ close: []; import: [chapters: Chapter[]] }>();
+defineProps<{ error?: string; busy?: boolean }>();
+const emit = defineEmits<{
+  close: [];
+  import: [chapters: Chapter[]];
+  file: [file: File, applyGraph: boolean];
+}>();
 const dialog = ref<HTMLDialogElement | null>(null),
   text = ref("");
+function templateFile() {
+  downloadBlob(
+    new Blob([JSON.stringify(example, null, 2)], { type: "application/json" }),
+    "vueflow-example-v2.json",
+  );
+}
+const applyGraph = ref(false);
 const chapters = computed(() => splitScript(text.value));
 onMounted(() => dialog.value?.showModal());
 </script>
 <template>
   <dialog ref="dialog" class="script-dialog" @close="emit('close')">
     <div class="dialog-heading">
-      <h2>整篇文稿，拆成章节</h2>
+      <h2>导入文稿或工程</h2>
       <button
         class="icon-button"
         aria-label="关闭文稿导入"
@@ -21,9 +35,33 @@ onMounted(() => dialog.value?.showModal());
         <StudioIcon name="close" />
       </button>
     </div>
+    <p v-if="error" class="message error" role="alert">{{ error }}</p>
     <p class="hint">
       用「# 开场」「#
       正文」等标题划分章节；没有标题时按空行分段。新增到当前工程，已有章节会保留。
+    </p>
+    <button class="secondary small" :disabled="busy" @click="templateFile">
+      下载 v2 示例配置
+    </button>
+    <label class="hint"
+      ><input type="checkbox" v-model="applyGraph" :disabled="busy" />
+      同时采用文件中的图谱布局（JSON / ZIP）</label
+    >
+    <label class="field"
+      >选择文件<input
+        :disabled="busy"
+        type="file"
+        accept=".txt,.md,.json,.zip,.vueflow"
+        @change="
+          (event) => {
+            const file = (event.target as HTMLInputElement).files?.[0];
+            if (file) emit('file', file, applyGraph);
+          }
+        "
+    /></label>
+    <p class="hint">
+      TXT / Markdown 自动拆章拆句；JSON 使用 v2 格式；ZIP
+      工程包包含素材。均追加到当前工程。
     </p>
     <label class="field"
       >完整文稿<textarea
@@ -36,14 +74,16 @@ onMounted(() => dialog.value?.showModal());
     <div class="import-preview">
       <span v-for="(chapter, index) in chapters.slice(0, 8)" :key="chapter.id"
         >{{ index + 1 }}. {{ chapter.title }} ·
-        {{ chapter.text.length }} 字</span
+        {{ chapter.segments.length }} 句段</span
       ><span v-if="chapters.length > 8">还有 {{ chapters.length - 8 }} 章</span>
     </div>
     <div class="dialog-actions">
-      <span class="muted">识别到 {{ chapters.length }} 个章节</span
+      <span class="muted"
+        >识别到 {{ chapters.length }} 章 /
+        {{ chapters.reduce((n, c) => n + c.segments.length, 0) }} 句段</span
       ><button
         class="primary"
-        :disabled="!chapters.length || chapters.length > 200"
+        :disabled="busy || !chapters.length || chapters.length > 200"
         @click="emit('import', chapters)"
       >
         添加到工作流

@@ -1,40 +1,45 @@
-import { newChapter } from "./project";
-import type { Chapter } from "./types";
-/** Preserve spoken content; headings are chapter labels rather than spoken text. */
+import { newChapter, newSegment } from "./project";
+import type { Chapter, Segment } from "./types";
+import { parseScriptDocument, splitSentences } from "../../shared/script-parser.mjs";
+
+export { splitSentences };
+
+/** Group labels are not spoken; the shared parser owns chapter and sentence boundaries. */
 export function splitScript(source: string): Chapter[] {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  const heading =
-    /^(?:#{1,6}\s+(.+)|第[一二三四五六七八九十百零〇\d]+[章节][：:、.\s]*(.*)|【([^】]+)】)\s*$/;
-  const sections: { title: string; lines: string[] }[] = [];
-  let current: { title: string; lines: string[] } | null = null;
-  if (lines.some((line) => heading.test(line.trim()))) {
-    for (const line of lines) {
-      const match = heading.exec(line.trim());
-      if (match) {
-        current = {
-          title: (match[1] || match[2] || match[3] || line.trim()).trim(),
-          lines: [],
-        };
-        sections.push(current);
-      } else if (current) current.lines.push(line);
-      else if (line.trim()) {
-        current = { title: "开场", lines: [line] };
-        sections.push(current);
-      }
-    }
-  } else {
-    for (const paragraph of source.replace(/\r\n?/g, "\n").split(/\n\s*\n/))
-      if (paragraph.trim())
-        sections.push({
-          title: `章节 ${sections.length + 1}`,
-          lines: [paragraph],
-        });
+  if (!source.trim()) return [];
+  let parsed: ReturnType<typeof parseScriptDocument>;
+  try {
+    parsed = parseScriptDocument(source);
+  } catch (error) {
+    // Live typing a heading is a valid incomplete draft; file imports stay strict in the shared parser.
+    if (error instanceof Error && error.message === "文稿没有可导入的正文") return [];
+    throw error;
   }
-  return sections
-    .filter((s) => s.lines.join("\n").trim())
-    .map((section, index) => ({
-      ...newChapter(index + 1),
-      title: section.title.slice(0, 120),
-      text: section.lines.join("\n").trim(),
-    }));
+  return parsed.chapters.map((chapter, index) => ({
+    ...newChapter(index + 1),
+    title: chapter.title.slice(0, 120),
+    segments: chapter.segments.map((segment, sentenceIndex) => ({
+      ...newSegment(sentenceIndex + 1),
+      text: segment.text,
+    })),
+  }));
+}
+
+/** Preserve the original and all its asset/history references as a disabled leaf. */
+export function splitSegment(segment: Segment): Segment[] {
+  if (!segment.enabled) return [segment];
+  const texts = splitSentences(segment.text);
+  if (texts.length <= 1) return [segment];
+  return [
+    { ...segment, enabled: false },
+    ...texts.map((text, index) => ({
+      ...newSegment(index + 1),
+      title: `${segment.title} · ${index + 1}`.slice(0, 120),
+      text,
+      direction: segment.direction,
+      gain: segment.gain,
+      gap: index === texts.length - 1 ? segment.gap : 0,
+      derivedFromId: segment.id,
+    })),
+  ];
 }

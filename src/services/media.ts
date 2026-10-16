@@ -1,4 +1,6 @@
-import type { AssetVersion, MediaKind, Project } from "../domain/types";
+import type { AssetVersion, MediaKind, Project, Segment } from "../domain/types";
+
+import { activeVersion, flattenSegments, segmentDuration } from "../domain/project";
 
 // Only one transport owns audio output, including silent inter-chapter gaps.
 let playbackOwner: { id: symbol; pause: () => void } | null = null;
@@ -14,26 +16,11 @@ export function releasePlayback(id: symbol) {
 
 export const volume = (gain: number) =>
   Math.min(1, Math.max(0, Number.isFinite(gain) ? gain : 0));
-export function selectedVersion(
-  chapter: Project["chapters"][number],
-  kind: MediaKind,
-): AssetVersion | null {
-  const id = kind === "audio" ? chapter.activeAudioId : chapter.activeVideoId;
-  return (
-    chapter.versions.find(
-      (version) => version.id === id && version.kind === kind,
-    ) ?? null
-  );
-}
-export function chapterPlayback(chapter: Project["chapters"][number]) {
-  const audio = selectedVersion(chapter, "audio"),
-    video = selectedVersion(chapter, "video");
-  return {
-    audio,
-    video,
-    duration: Math.max(audio?.duration ?? 0, video?.duration ?? 0),
-    muteVideo: !!audio,
-  };
+export const selectedVersion = activeVersion;
+export function segmentPlayback(segment: Segment) {
+  const audio = selectedVersion(segment, "audio"),
+    video = selectedVersion(segment, "video");
+  return { audio, video, duration: segmentDuration(segment), muteVideo: !!audio };
 }
 
 /** Wait for decoded playback data without leaving listeners behind on cancel/unmount. */
@@ -81,7 +68,7 @@ export function waitForMediaReady(
 }
 
 /** Narration is the clock while present; a longer remaining video takes over at its end. */
-export function syncChapterMedia(
+export function syncSegmentMedia(
   audio: HTMLMediaElement | null,
   video: HTMLMediaElement | null,
   tolerance = 0.065,
@@ -154,49 +141,50 @@ export function downloadBlob(blob: Blob, name: string) {
 
 /** Render selected audio only. Review approval is deliberately required for delivery. */
 export async function exportAudio(project: Project): Promise<Blob> {
-  if (!project.chapters.length) throw new Error("请先添加章节并导入音频。");
-  const items = project.chapters.map((chapter) => {
-    const version = selectedVersion(chapter, "audio");
+  const segments = flattenSegments(project);
+  if (!segments.length) throw new Error("请先添加启用句段并导入音频。");
+  const items = segments.map((segment) => {
+    const version = selectedVersion(segment, "audio");
     if (!version)
-      throw new Error(`「${chapter.title}」缺少选中的音频，无法完整导出。`);
+      throw new Error(`「${segment.title}」缺少选中的音频，无法完整导出。`);
     if (
-      version.textSnapshot !== chapter.text ||
+      version.textSnapshot !== segment.text ||
       (version.directionSnapshot !== undefined &&
-        version.directionSnapshot !== chapter.direction)
+        version.directionSnapshot !== segment.direction)
     )
       throw new Error(
-        `「${chapter.title}」音频对应旧文稿或表演要求，请重新生成或恢复原内容。`,
+        `「${segment.title}」音频对应旧文稿或表演要求，请重新生成或恢复原内容。`,
       );
     if (
-      chapter.comments.some(
+      segment.comments.some(
         (comment) => !comment.resolved && comment.versionId === version.id,
       )
     )
       throw new Error(
-        `「${chapter.title}」当前音频还有未解决的评论，请完成返修或确认解决。`,
+        `「${segment.title}」当前音频还有未解决的评论，请完成返修或确认解决。`,
       );
-    if (!chapter.approvedVersionIds.includes(version.id))
-      throw new Error(`请先审听并通过「${chapter.title}」的当前音频版本。`);
-    return { chapter, version };
+    if (!segment.approvedVersionIds.includes(version.id))
+      throw new Error(`请先审听并通过「${segment.title}」的当前音频版本。`);
+    return { segment, version };
   });
   const estimated = items.reduce(
-    (sum, { chapter, version }, index) =>
+    (sum, { segment, version }, index) =>
       sum +
       version.duration +
-      (index < items.length - 1 ? Math.max(0, chapter.gap) : 0),
+      (index < items.length - 1 ? Math.max(0, segment.gap) : 0),
     0,
   );
   if (!Number.isFinite(estimated) || estimated > 900)
-    throw new Error("浏览器 WAV 导出限 15 分钟，请分批导出章节。");
+    throw new Error("浏览器 WAV 导出限 15 分钟，请分批导出句段。");
   const decoder = new AudioContext({ sampleRate: 44100 });
   try {
     const decoded: AudioBuffer[] = [];
     let total = 0;
     // Sequential decode keeps in-flight memory bounded.
-    for (const { chapter, version } of items) {
+    for (const { segment, version } of items) {
       const response = await fetch(version.url);
       if (!response.ok)
-        throw new Error(`读取「${chapter.title}」失败 (${response.status})。`);
+        throw new Error(`读取「${segment.title}」失败 (${response.status})。`);
       const data = await response.arrayBuffer();
       if (data.byteLength > 150 * 1024 * 1024)
         throw new Error("单个音频超过 150 MB，请压缩或分段后重试。");
@@ -210,7 +198,7 @@ export async function exportAudio(project: Project): Promise<Blob> {
       total +
       items
         .slice(0, -1)
-        .reduce((sum, item) => sum + Math.max(0, item.chapter.gap), 0);
+        .reduce((sum, item) => sum + Math.max(0, item.segment.gap), 0);
     if (duration > 900) throw new Error("包含停顿后的时长超过 15 分钟。");
     const context = new OfflineAudioContext(
       2,
@@ -218,15 +206,15 @@ export async function exportAudio(project: Project): Promise<Blob> {
       44100,
     );
     let offset = 0;
-    items.forEach(({ chapter }, index) => {
+    items.forEach(({ segment }, index) => {
       const source = context.createBufferSource();
       source.buffer = decoded[index];
       const gain = context.createGain();
-      gain.gain.value = volume(chapter.gain) * volume(project.masterGain);
+      gain.gain.value = volume(segment.gain) * volume(project.masterGain);
       source.connect(gain);
       gain.connect(context.destination);
       source.start(offset);
-      offset += decoded[index].duration + Math.max(0, chapter.gap);
+      offset += decoded[index].duration + Math.max(0, segment.gap);
     });
     const rendered = await context.startRendering();
     return encodeWav(rendered);

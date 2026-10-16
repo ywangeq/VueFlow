@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type {
-  Chapter,
+  Segment,
   MediaKind,
   Project,
   ReviewComment,
@@ -13,15 +13,19 @@ import {
   formatTime,
   uid,
 } from "../domain/project";
-import ChapterMediaPreview from "./ChapterMediaPreview.vue";
+import SegmentMediaPreview from "./SegmentMediaPreview.vue";
+import { splitSentences } from "../domain/script";
 import StudioIcon from "./StudioIcon.vue";
 const props = defineProps<{
-  chapter: Chapter;
+  segment: Segment;
+  chapterTitle: string;
   project: Project;
   busy: boolean;
-  playhead: { chapterId: string; time: number; versionId: string } | null;
+  playhead: { segmentId: string; time: number; versionId: string } | null;
 }>();
 const emit = defineEmits<{
+  split: [];
+  toggle: [];
   dirty: [];
   save: [];
   upload: [file: File, kind: MediaKind, jobId?: string];
@@ -36,8 +40,8 @@ const tab = ref("script"),
   commentVersionId = ref("");
 const sources = computed(() =>
   [
-    activeVersion(props.chapter, "audio"),
-    activeVersion(props.chapter, "video"),
+    activeVersion(props.segment, "audio"),
+    activeVersion(props.segment, "video"),
   ].filter((v): v is AssetVersion => !!v),
 );
 const selected = computed(
@@ -47,33 +51,34 @@ const selected = computed(
     null,
 );
 const jobs = computed(() =>
-  props.project.jobs.filter((j) => j.chapterId === props.chapter.id),
+  props.project.jobs.filter((j) => j.segmentId === props.segment.id),
 );
 const pending = computed(() =>
   jobs.value.filter((j) => j.status === "awaiting_external"),
 );
+const canSplit = computed(() => props.segment.enabled && splitSentences(props.segment.text).length > 1);
 const hasStale = computed(() => sources.value.some(isStale));
 const activeComments = computed(() =>
-  props.chapter.comments.filter(
+  props.segment.comments.filter(
     (c) => !c.resolved && sources.value.some((v) => v.id === c.versionId),
   ),
 );
 const kindLabel = (kind: MediaKind) => (kind === "audio" ? "旁白" : "画面");
 function isStale(v: AssetVersion) {
   return (
-    v.textSnapshot !== props.chapter.text ||
+    v.textSnapshot !== props.segment.text ||
     (v.directionSnapshot !== undefined &&
-      v.directionSnapshot !== props.chapter.direction)
+      v.directionSnapshot !== props.segment.direction)
   );
 }
 function isActive(v: AssetVersion) {
   return sources.value.some((s) => s.id === v.id);
 }
 function commentAsset(c: ReviewComment) {
-  return props.chapter.versions.find((v) => v.id === c.versionId);
+  return props.segment.versions.find((v) => v.id === c.versionId);
 }
 watch(
-  () => props.chapter.id,
+  () => props.segment.id,
   () => {
     draft.value = "";
     currentTime.value = 0;
@@ -101,28 +106,31 @@ watch(
 watch(
   () => props.playhead,
   (p) => {
-    if (p?.chapterId === props.chapter.id) currentTime.value = p.time;
+    if (p?.segmentId === props.segment.id) currentTime.value = p.time;
   },
 );
 function pickVersion(v: AssetVersion) {
-  if (v.kind === "audio") props.chapter.activeAudioId = v.id;
-  else props.chapter.activeVideoId = v.id;
+  if (props.busy || !props.segment.enabled) return;
+  if (v.kind === "audio") props.segment.activeAudioId = v.id;
+  else props.segment.activeVideoId = v.id;
   commentVersionId.value = v.id;
   emit("dirty");
   emit("save");
 }
 function approve() {
+  if (props.busy || !props.segment.enabled) return;
   if (!sources.value.length || hasStale.value || activeComments.value.length)
     return;
   for (const v of sources.value)
-    if (!props.chapter.approvedVersionIds.includes(v.id))
-      props.chapter.approvedVersionIds.push(v.id);
+    if (!props.segment.approvedVersionIds.includes(v.id))
+      props.segment.approvedVersionIds.push(v.id);
   emit("dirty");
   emit("save");
 }
 function comment() {
+  if (props.busy || !props.segment.enabled) return;
   if (!draft.value.trim() || !selected.value) return;
-  props.chapter.comments.push({
+  props.segment.comments.push({
     id: uid(),
     text: draft.value.trim(),
     versionId: selected.value.id,
@@ -135,25 +143,29 @@ function comment() {
   emit("save");
 }
 function resolve(c: ReviewComment) {
+  if (props.busy || !props.segment.enabled) return;
   c.resolved = !c.resolved;
   emit("dirty");
   emit("save");
 }
 function regenerate(c: ReviewComment) {
+  if (props.busy || !props.segment.enabled) return;
   const v = commentAsset(c);
   if (v && isActive(v) && !c.resolved) emit("queue", v.kind, [c.id]);
 }
 function queue(kind: MediaKind) {
-  const v = activeVersion(props.chapter, kind);
+  if (props.busy || !props.segment.enabled) return;
+  const v = activeVersion(props.segment, kind);
   emit(
     "queue",
     kind,
-    props.chapter.comments
+    props.segment.comments
       .filter((c) => !c.resolved && c.versionId === v?.id)
       .map((c) => c.id),
   );
 }
 function upload(event: Event) {
+  if (props.busy || !props.segment.enabled) return;
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = "";
@@ -176,7 +188,7 @@ function upload(event: Event) {
 }
 async function copyText() {
   try {
-    await navigator.clipboard.writeText(props.chapter.text);
+    await navigator.clipboard.writeText(props.segment.text);
     emit("notice", "文稿已复制。");
   } catch {
     emit("notice", "请在文稿框中选中正文复制。");
@@ -184,35 +196,42 @@ async function copyText() {
 }
 </script>
 <template>
-  <aside class="inspector" aria-label="章节音画编辑与审阅">
+  <aside class="inspector" aria-label="句段音画编辑与审阅">
     <div class="inspector-heading">
-      <span class="eyebrow">章节详情</span
+      <span class="eyebrow">{{ chapterTitle }} · 句段详情</span
       ><span
         class="status-pill"
-        :data-status="combinedChapterStatus(chapter)"
-        >{{ combinedChapterStatus(chapter) }}</span
+        :data-status="segment.enabled ? combinedChapterStatus(segment) : '已停用'"
+        >{{ segment.enabled ? combinedChapterStatus(segment) : '已停用' }}</span
       >
     </div>
     <input
       class="chapter-title"
-      aria-label="章节名称"
-      v-model="chapter.title"
-      :disabled="busy"
+      aria-label="句段名称"
+      v-model="segment.title"
+      :disabled="busy || !segment.enabled"
       maxlength="120"
       @input="emit('dirty')"
     />
-    <div class="chapter-sources" aria-label="同一章节的素材">
+    <div class="segment-actions">
+      <button type="button" class="secondary small" :disabled="busy || !canSplit || pending.length > 0" @click="emit('split')">逐句拆分</button>
+      <button type="button" class="text-button" :disabled="busy || pending.length > 0" @click="emit('toggle')">{{ segment.enabled ? '停用句段' : '启用句段' }}</button>
+    </div>
+    <p v-if="pending.length" class="hint">先完成或取消待执行任务，再拆分或停用。</p>
+    <p v-if="!segment.enabled" class="hint">已停用的原句段保留素材与评论，仅供历史预览；不参与连播、生成或导出。</p>
+    <SegmentMediaPreview v-if="!segment.enabled" :segment="segment" :master-gain="project.masterGain" />
+    <div class="chapter-sources" aria-label="同一句段的素材">
       <div v-for="kind in ['audio', 'video'] as const" :key="kind">
         <StudioIcon :name="kind" :size="15" /><span>{{ kindLabel(kind) }}</span
-        ><strong :title="activeVersion(chapter, kind)?.name">{{
-          activeVersion(chapter, kind)?.name ?? "未添加"
+        ><strong :title="activeVersion(segment, kind)?.name">{{
+          activeVersion(segment, kind)?.name ?? "未添加"
         }}</strong
-        ><span v-if="activeVersion(chapter, kind)" class="muted">{{
-          formatTime(activeVersion(chapter, kind)!.duration)
+        ><span v-if="activeVersion(segment, kind)" class="muted">{{
+          formatTime(activeVersion(segment, kind)!.duration)
         }}</span>
       </div>
     </div>
-    <div class="inspector-tabs" role="tablist" aria-label="章节编辑视图">
+    <div class="inspector-tabs" role="tablist" aria-label="句段编辑视图">
       <button
         v-for="t in [
           { id: 'script', label: '文稿与表现' },
@@ -227,42 +246,42 @@ async function copyText() {
         {{ t.label }}
       </button>
     </div>
-    <fieldset class="inspector-body" :disabled="busy">
+    <fieldset class="inspector-body" :disabled="busy || !segment.enabled">
       <template v-if="tab === 'script'">
         <label class="field"
           >朗读正文<textarea
-            v-model="chapter.text"
+            v-model="segment.text"
             rows="8"
-            placeholder="写下这一章想讲的内容…"
+            placeholder="写下这一句段想讲的内容…"
             @input="emit('dirty')"
           />
         </label>
         <div class="field-meta">
-          <span>{{ chapter.text.length }} 字</span
+          <span>{{ segment.text.length }} 字</span
           ><button class="text-button" @click="copyText">
             <StudioIcon name="copy" :size="14" />复制正文
           </button>
         </div>
         <label class="field"
-          >本章表现与画面要求<textarea
-            v-model="chapter.direction"
+          >本句段表现与画面要求<textarea
+            v-model="segment.direction"
             rows="3"
             placeholder="情绪、重音、语速、画面要求…"
             @input="emit('dirty')"
           />
         </label>
         <p class="hint">
-          文稿、要求、素材和评论都归属于同一章节。要求不混入朗读正文。
+          文稿、要求、素材和评论都归属于同一句段。要求不混入朗读正文。
         </p>
         <div class="section-divider"></div>
         <label class="field slider-label"
-          >章节声音 <output>{{ Math.round(chapter.gain * 100) }}%</output
+          >句段声音 <output>{{ Math.round(segment.gain * 100) }}%</output
           ><input
             type="range"
             min="0"
             max="1"
             step="0.01"
-            v-model.number="chapter.gain"
+            v-model.number="segment.gain"
             @input="emit('dirty')"
             @change="emit('save')"
         /></label>
@@ -273,19 +292,20 @@ async function copyText() {
               min="0"
               max="10"
               step="0.1"
-              v-model.number="chapter.gap"
+              v-model.number="segment.gap"
               @input="emit('dirty')"
               @change="emit('save')"
             />秒</span
           ></label
         >
         <p class="hint">
-          在「音画与评论」用同一个播放进度审阅旁白和画面。目前按章从零点对齐，精细剪辑时间线后续接入。
+          在「音画与评论」用同一个播放进度审阅旁白和画面。目前按句段从零点对齐，精细剪辑时间线后续接入。
         </p>
       </template>
       <template v-else-if="tab === 'review'">
-        <ChapterMediaPreview
-          :chapter="chapter"
+        <SegmentMediaPreview
+          v-if="segment.enabled"
+          :segment="segment"
           :master-gain="project.masterGain"
           @time="currentTime = $event.time"
         />
@@ -296,14 +316,14 @@ async function copyText() {
             !sources.length ||
             hasStale ||
             !!activeComments.length ||
-            combinedChapterStatus(chapter) === '已通过'
+            combinedChapterStatus(segment) === '已通过'
           "
           @click="approve"
         >
           <StudioIcon name="check" :size="16" />{{
-            combinedChapterStatus(chapter) === "已通过"
-              ? "本章已通过"
-              : "标记本章素材通过"
+            combinedChapterStatus(segment) === "已通过"
+              ? "本句段已通过"
+              : "标记本句段素材通过"
           }}
         </button>
         <p v-if="hasStale" class="inline-warning">
@@ -314,7 +334,7 @@ async function copyText() {
         </p>
         <div class="section-divider"></div>
         <div class="section-title">
-          <h3>本章评论</h3>
+          <h3>本句段评论</h3>
           <span class="muted">{{ formatTime(currentTime) }}</span>
         </div>
         <label class="field"
@@ -330,7 +350,7 @@ async function copyText() {
         >
         <textarea
           v-model="draft"
-          aria-label="本章评论"
+          aria-label="本句段评论"
           rows="3"
           placeholder="例如：这里的画面晚了半拍，或这句停顿太长。"
           :disabled="!selected"
@@ -347,7 +367,7 @@ async function copyText() {
           所有意见集中在这里，保留具体素材版本和时间点。重新生成只处理对应素材。
         </p>
         <div
-          v-for="c in chapter.comments.slice().reverse()"
+          v-for="c in segment.comments.slice().reverse()"
           :key="c.id"
           class="comment-item"
           :class="{ resolved: c.resolved }"
@@ -375,17 +395,17 @@ async function copyText() {
             按此评论重新生成 <StudioIcon name="arrow" :size="14" />
           </button>
         </div>
-        <p v-if="!chapter.comments.length" class="empty-copy">
+        <p v-if="!segment.comments.length" class="empty-copy">
           在同一节点里审阅声音与画面。
         </p>
       </template>
       <template v-else>
         <div class="section-title">
-          <h3>本章全部素材</h3>
-          <span class="muted">{{ chapter.versions.length }} 个版本</span>
+          <h3>本句段全部素材</h3>
+          <span class="muted">{{ segment.versions.length }} 个版本</span>
         </div>
         <button
-          v-for="v in chapter.versions.slice().reverse()"
+          v-for="v in segment.versions.slice().reverse()"
           :key="v.id"
           class="version-row"
           :class="{ active: isActive(v) }"
@@ -400,8 +420,8 @@ async function copyText() {
             ></span
           ><StudioIcon v-if="isActive(v)" name="check" :size="16" />
         </button>
-        <p v-if="!chapter.versions.length" class="empty-copy">
-          导入旁白或画面，都会进入这个章节节点。
+        <p v-if="!segment.versions.length" class="empty-copy">
+          导入旁白或画面，都会进入这个句段节点。
         </p>
         <div class="section-divider"></div>
         <label class="field"
@@ -422,9 +442,9 @@ async function copyText() {
             @change="upload"
         /></label>
         <p class="hint">
-          自动识别音视频，保存在同一章节。任务过期的结果保留为历史版本。
+          自动识别音视频，保存在同一句段。任务过期的结果保留为历史版本。
         </p>
-        <div class="section-title task-heading"><h3>本章生成记录</h3></div>
+        <div class="section-title task-heading"><h3>本句段生成记录</h3></div>
         <div v-for="j in jobs.slice().reverse()" :key="j.id" class="job-row">
           <div>
             <span class="task-dot" :class="j.status"></span
@@ -451,7 +471,7 @@ async function copyText() {
           </button>
         </div>
         <p v-if="!jobs.length" class="empty-copy">
-          创建任务后导出交接清单，外部执行完成再回填到本章。
+          创建任务后导出交接清单，外部执行完成再回填到本句段。
         </p>
       </template>
     </fieldset>
@@ -459,19 +479,23 @@ async function copyText() {
       <div class="generation-actions">
         <button
           class="primary"
-          :disabled="busy || !chapter.text.trim()"
+          :disabled="busy || !segment.enabled || !segment.text.trim()"
           @click="queue('audio')"
         >
           <StudioIcon name="audio" :size="16" />生成旁白</button
         ><button
           class="secondary"
-          :disabled="busy || !chapter.text.trim()"
+          :disabled="busy || !segment.enabled || !segment.text.trim()"
           @click="queue('video')"
         >
           <StudioIcon name="video" :size="16" />生成画面
         </button>
       </div>
-      <small>同一章节 · 外部生成任务交接</small>
+      <small>同一句段 · 外部生成任务交接</small>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.segment-actions { display: flex; align-items: center; gap: 14px; margin: 12px 0; }
+</style>

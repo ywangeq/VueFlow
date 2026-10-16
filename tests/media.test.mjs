@@ -6,28 +6,34 @@ const source = await fs.readFile(
   new URL("../src/services/media.ts", import.meta.url),
   "utf8",
 );
-const js = ts.transpileModule(source, {
+const compile = (text) => ts.transpileModule(text, {
   compilerOptions: {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
   },
 }).outputText;
+const domainSource = await fs.readFile(new URL("../src/domain/project.ts", import.meta.url), "utf8");
+const domainUrl = `data:text/javascript;base64,${Buffer.from(compile(domainSource)).toString("base64")}`;
+const js = compile(source).replace(/from ["\']\.\.\/domain\/project["\']/g, "from " + JSON.stringify(domainUrl));
 const {
   volume,
   selectedVersion,
   exportAudio,
-  chapterPlayback,
+  segmentPlayback,
   waitForMediaReady,
-  syncChapterMedia,
+  syncSegmentMedia,
   claimPlayback,
   releasePlayback,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`
 );
 const version = { id: "a", kind: "audio", textSnapshot: "hello", duration: 2 };
-const chapter = {
-  title: "Chapter",
+const segment = {
+  id: "segment-1",
+  enabled: true,
+  title: "句段",
   text: "hello",
+  direction: "自然聊天",
   gain: 1,
   gap: 0,
   versions: [version],
@@ -36,16 +42,21 @@ const chapter = {
   approvedVersionIds: ["a"],
   comments: [],
 };
-const project = { masterGain: 1, chapters: [chapter] };
+const projectWith = (...segments) => ({
+  schemaVersion: 2, id: "project", title: "工程", revision: 0, updatedAt: "", jobs: [], masterGain: 1,
+  graph: {layout: "chapter-segments", theme: "scifi", columnWidth: 220, rowGap: 180},
+  chapters: [{id: "chapter-1", title: "章节一", segments}],
+});
+const project = projectWith(segment);
 test("media selection cannot substitute a different media kind or absent version", () => {
-  assert.equal(selectedVersion(chapter, "audio"), version);
-  assert.equal(selectedVersion(chapter, "video"), null);
+  assert.equal(selectedVersion(segment, "audio"), version);
+  assert.equal(selectedVersion(segment, "video"), null);
   assert.equal(
-    selectedVersion({ ...chapter, activeVideoId: "a" }, "video"),
+    selectedVersion({ ...segment, activeVideoId: "a" }, "video"),
     null,
   );
   assert.equal(
-    selectedVersion({ ...chapter, activeAudioId: "missing" }, "audio"),
+    selectedVersion({ ...segment, activeAudioId: "missing" }, "audio"),
     null,
   );
 });
@@ -56,30 +67,21 @@ test("playback gain stays in native media range", () => {
   assert.equal(volume(0.4), 0.4);
 });
 test("export refuses incomplete, stale and unapproved sequences before decoding", async () => {
-  await assert.rejects(exportAudio({ ...project, chapters: [] }), /添加章节/);
+  await assert.rejects(exportAudio({ ...project, chapters: [] }), /添加启用句段/);
   await assert.rejects(
-    exportAudio({
-      ...project,
-      chapters: [{ ...chapter, activeAudioId: null }],
-    }),
+    exportAudio(projectWith({ ...segment, activeAudioId: null })),
     /缺少/,
   );
   await assert.rejects(
-    exportAudio({ ...project, chapters: [{ ...chapter, text: "new" }] }),
+    exportAudio(projectWith({ ...segment, text: "new" })),
     /旧文稿/,
   );
   await assert.rejects(
-    exportAudio({
-      ...project,
-      chapters: [{ ...chapter, approvedVersionIds: [] }],
-    }),
+    exportAudio(projectWith({ ...segment, approvedVersionIds: [] })),
     /审听/,
   );
   await assert.rejects(
-    exportAudio({
-      ...project,
-      chapters: [{ ...chapter, versions: [{ ...version, duration: 901 }] }],
-    }),
+    exportAudio(projectWith({ ...segment, versions: [{ ...version, duration: 901 }] })),
     /15 分钟/,
   );
 });
@@ -136,8 +138,11 @@ test("audio export schedules gains and gaps and writes bounded stereo PCM WAV", 
     const blob = await exportAudio({
       masterGain: 0.5,
       chapters: [
-        { ...chapter, gain: 0.6, gap: 1 },
-        { ...chapter, gain: 1 },
+        {id: "chapter-1", title: "章节一", segments: [
+          { ...segment, id: "disabled", enabled: false, activeAudioId: null, gap: 99 },
+          { ...segment, gain: 0.6, gap: 1 },
+        ]},
+        {id: "chapter-2", title: "章节二", segments: [{ ...segment, id: "segment-2", gain: 1 }]},
       ],
     });
     assert.deepEqual(starts, [0, 3]);
@@ -179,36 +184,24 @@ test("playback ownership pauses previous transport and ignores old owner release
 });
 test("export blocks unresolved feedback on selected version only", async () => {
   await assert.rejects(
-    exportAudio({
-      ...project,
-      chapters: [
-        { ...chapter, comments: [{ versionId: "a", resolved: false }] },
-      ],
-    }),
+    exportAudio(projectWith({ ...segment, comments: [{ versionId: "a", resolved: false }] })),
     /未解决/,
   );
 });
 
 test("export refuses obsolete performance direction when captured", async () => {
   await assert.rejects(
-    exportAudio({
-      ...project,
-      chapters: [
-        {
-          ...chapter,
-          direction: "new",
-          versions: [{ ...version, directionSnapshot: "old" }],
-        },
-      ],
-    }),
+    exportAudio(projectWith({
+      ...segment, direction: "new", versions: [{ ...version, directionSnapshot: "old" }],
+    })),
     /表演要求/,
   );
 });
 
-test("unified chapter playback uses max duration and separate narration mutes video", () => {
+test("unified segment playback uses max duration and separate narration mutes video", () => {
   const video = { ...version, id: "v", kind: "video", duration: 5 };
-  const paired = chapterPlayback({
-    ...chapter,
+  const paired = segmentPlayback({
+    ...segment,
     activeVideoId: "v",
     versions: [version, video],
   });
@@ -216,15 +209,15 @@ test("unified chapter playback uses max duration and separate narration mutes vi
   assert.equal(paired.video, video);
   assert.equal(paired.duration, 5);
   assert.equal(paired.muteVideo, true);
-  const videoOnly = chapterPlayback({
-    ...chapter,
+  const videoOnly = segmentPlayback({
+    ...segment,
     activeAudioId: null,
     activeVideoId: "v",
     versions: [video],
   });
   assert.equal(videoOnly.duration, 5);
   assert.equal(videoOnly.muteVideo, false);
-  const empty = chapterPlayback({ ...chapter, activeAudioId: null });
+  const empty = segmentPlayback({ ...segment, activeAudioId: null });
   assert.equal(empty.duration, 0);
   assert.equal(empty.audio, null);
   assert.equal(empty.video, null);
@@ -233,15 +226,15 @@ test("unified chapter playback uses max duration and separate narration mutes vi
 test("narration is shared clock and video cannot outrun it", () => {
   const audio = { currentTime: 0.02322, duration: 2, ended: false };
   const video = { currentTime: 0.200163, duration: 5, ended: false };
-  assert.equal(syncChapterMedia(audio, video), audio.currentTime);
+  assert.equal(syncSegmentMedia(audio, video), audio.currentTime);
   assert.equal(video.currentTime, audio.currentTime);
   audio.currentTime = 2;
   audio.ended = true;
   video.currentTime = 2.3;
-  assert.equal(syncChapterMedia(audio, video), 2.3);
+  assert.equal(syncSegmentMedia(audio, video), 2.3);
   assert.equal(audio.currentTime, 2); // finished short narration stays at its end
   audio.ended = false; // seeking to the short source end need not dispatch ended
-  assert.equal(syncChapterMedia(audio, video), 2.3);
+  assert.equal(syncSegmentMedia(audio, video), 2.3);
 });
 test("media readiness waits for decoded data and removes listeners on success, abort, timeout", async () => {
   class Media extends EventTarget {

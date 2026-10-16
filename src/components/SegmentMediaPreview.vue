@@ -1,26 +1,26 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
-import type { Chapter } from "../domain/types";
+import type { Segment } from "../domain/types";
 import {
-  chapterPlayback,
+  segmentPlayback,
   volume,
   claimPlayback,
   releasePlayback,
   waitForMediaReady,
-  syncChapterMedia,
+  syncSegmentMedia,
 } from "../services/media";
 const props = defineProps<{
-  chapter: Chapter;
+  segment: Segment;
   masterGain: number;
   compact?: boolean;
 }>();
 const emit = defineEmits<{
-  time: [{ chapterId: string; time: number; versionId: string }];
+  time: [{ segmentId: string; time: number; versionId: string }];
   playing: [boolean];
   starting: [];
   ended: [];
 }>();
-const plan = computed(() => chapterPlayback(props.chapter));
+const plan = computed(() => segmentPlayback(props.segment));
 const audioVersion = computed(() => plan.value.audio);
 const videoVersion = computed(() => plan.value.video);
 const audio = ref<HTMLAudioElement | null>(null),
@@ -37,7 +37,7 @@ const available = computed(() => !!(audioVersion.value || videoVersion.value));
 const playing = ref(false),
   position = ref(0),
   error = ref("");
-const owner = Symbol("chapter-media");
+const owner = Symbol("segment-media");
 let interval: ReturnType<typeof setInterval> | undefined;
 let request = 0;
 let pendingReady: AbortController | null = null;
@@ -48,7 +48,7 @@ function clearClock() {
   interval = undefined;
 }
 function setVolumes() {
-  const gain = volume(props.chapter.gain) * volume(props.masterGain);
+  const gain = volume(props.segment.gain) * volume(props.masterGain);
   if (audio.value) audio.value.volume = gain;
   if (video.value) {
     video.value.muted = !!audioVersion.value;
@@ -63,7 +63,7 @@ function publish() {
       : videoVersion.value || audioVersion.value;
   if (version)
     emit("time", {
-      chapterId: props.chapter.id,
+      segmentId: props.segment.id,
       time: Math.min(
         position.value,
         version.kind === "audio"
@@ -103,7 +103,7 @@ function tick(event?: Event) {
   if (!playing.value) return;
   position.value = Math.min(
     duration.value,
-    syncChapterMedia(audio.value, video.value),
+    syncSegmentMedia(audio.value, video.value),
   );
   publish();
   const elements = [audio.value, video.value].filter(
@@ -168,7 +168,7 @@ async function play() {
     if (results.some((result) => result.status === "rejected"))
       throw new Error("播放失败，请检查素材格式并再次点击播放。");
     // A browser may resolve video.play() before audio.play(); align to narration once both started.
-    position.value = syncChapterMedia(audio.value, video.value, 0);
+    position.value = syncSegmentMedia(audio.value, video.value, 0);
     clearClock();
     interval = setInterval(tick, 40);
     emit("playing", true);
@@ -205,7 +205,7 @@ function failed(event: Event) {
 }
 watch(
   () =>
-    `${props.chapter.id}:${audioVersion.value?.id}:${videoVersion.value?.id}`,
+    `${props.segment.id}:${audioVersion.value?.id}:${videoVersion.value?.id}`,
   () => {
     pause();
     position.value = 0;
@@ -215,7 +215,7 @@ watch(
   },
 );
 watch(
-  [audio, video, () => props.chapter.gain, () => props.masterGain],
+  [audio, video, () => props.segment.gain, () => props.masterGain],
   setVolumes,
   { flush: "post" },
 );
@@ -223,12 +223,12 @@ onBeforeUnmount(() => pause(false));
 defineExpose({ play, pause, stop, seek });
 </script>
 <template>
-  <div class="chapter-media-preview" :class="{ compact }">
+  <div class="segment-media-preview" :class="{ compact }">
     <video
       v-if="videoVersion"
       :key="videoVersion.id"
       ref="video"
-      data-media-role="chapter-video"
+      data-media-role="segment-video"
       :src="videoVersion.url"
       :muted="!!audioVersion"
       preload="auto"
@@ -241,20 +241,20 @@ defineExpose({ play, pause, stop, seek });
       v-if="audioVersion"
       :key="audioVersion.id"
       ref="audio"
-      data-media-role="chapter-audio"
+      data-media-role="segment-audio"
       :src="audioVersion.url"
       preload="auto"
       @loadedmetadata="loaded('audio')"
       @ended="tick"
       @error="failed"
     />
-    <div v-if="!available" class="empty">导入本章音频或视频，开始预览。</div>
+    <div v-if="!available" class="empty">导入本句段音频或视频，开始预览。</div>
     <div v-else class="source-note">
       {{
         audioVersion && videoVersion
           ? "音频 + 视频同步预览 · 视频原声已静音"
           : audioVersion
-            ? "音频预览 · 本章暂无视频"
+            ? "音频预览 · 本句段暂无视频"
             : "视频预览 · 使用视频原声"
       }}
     </div>
@@ -314,7 +314,7 @@ defineExpose({ play, pause, stop, seek });
     </div>
     <input
       type="range"
-      aria-label="本章音视频共同进度"
+      aria-label="本句段音视频共同进度"
       min="0"
       :max="duration || 0"
       step="0.1"

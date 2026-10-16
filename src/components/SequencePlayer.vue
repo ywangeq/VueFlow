@@ -1,35 +1,37 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from "vue";
 import type { Project } from "../domain/types";
+import { flattenSegments } from "../domain/project";
 import {
   selectedVersion,
   claimPlayback,
   releasePlayback,
 } from "../services/media";
-import ChapterMediaPreview from "./ChapterMediaPreview.vue";
+import SegmentMediaPreview from "./SegmentMediaPreview.vue";
 const props = defineProps<{ project: Project }>();
 const emit = defineEmits<{
   select: [string];
-  time: [{ chapterId: string; time: number; versionId: string }];
+  time: [{ segmentId: string; time: number; versionId: string }];
 }>();
+const segments = computed(() => flattenSegments(props.project));
 const items = computed(() =>
-  props.project.chapters.filter(
+  segments.value.filter(
     (chapter) =>
       selectedVersion(chapter, "audio") || selectedVersion(chapter, "video"),
   ),
 );
 const missing = computed(
-  () => props.project.chapters.length - items.value.length,
+  () => segments.value.length - items.value.length,
 );
 const missingAudio = computed(
   () =>
-    props.project.chapters.filter(
+    segments.value.filter(
       (chapter) => !selectedVersion(chapter, "audio"),
     ).length,
 );
 const missingVideo = computed(
   () =>
-    props.project.chapters.filter(
+    segments.value.filter(
       (chapter) => !selectedVersion(chapter, "video"),
     ).length,
 );
@@ -51,7 +53,7 @@ const index = ref(0),
   playing = ref(false),
   gapLeft = ref(0);
 const current = computed(() => items.value[index.value]);
-const preview = ref<InstanceType<typeof ChapterMediaPreview> | null>(null);
+const preview = ref<InstanceType<typeof SegmentMediaPreview> | null>(null);
 const owner = Symbol("sequence-gap");
 let timer: ReturnType<typeof setInterval> | undefined,
   tick = 0;
@@ -138,32 +140,32 @@ function transportPlaying(value: boolean) {
 }
 watch(
   () =>
-    `${props.project.id}:${props.project.chapters.map((chapter) => `${chapter.id}:${chapter.activeAudioId}:${chapter.activeVideoId}`).join("|")}`,
+    `${props.project.id}:${segments.value.map((chapter) => `${chapter.id}:${chapter.activeAudioId}:${chapter.activeVideoId}`).join("|")}`,
   stop,
 );
 onBeforeUnmount(pause);
 </script>
 <template>
-  <section class="sequence-player" aria-label="全文章节音视频预览">
+  <section class="sequence-player" aria-label="全文句段音视频预览">
     <div class="sequence-status">
-      <span>{{ items.length }} / {{ project.chapters.length }} 章可播放</span
-      ><span>旁白与画面共用章节顺序</span>
+      <span>{{ items.length }} / {{ segments.length }} 句段可播放</span
+      ><span>按章节与启用句段顺序连播</span>
     </div>
     <p
       v-if="missing || missingAudio || missingVideo || stale"
       class="notice"
       role="status"
     >
-      <span v-if="missing">{{ missing }} 章暂无素材，连播时跳过。 </span
-      ><span v-if="missingAudio">{{ missingAudio }} 章未添加旁白。 </span
-      ><span v-if="missingVideo">{{ missingVideo }} 章未添加画面。 </span
-      ><span v-if="stale">{{ stale }} 章素材对应旧文稿或表演要求。</span>
+      <span v-if="missing">{{ missing }} 句段暂无素材，连播时跳过。 </span
+      ><span v-if="missingAudio">{{ missingAudio }} 句段未添加旁白。 </span
+      ><span v-if="missingVideo">{{ missingVideo }} 句段未添加画面。 </span
+      ><span v-if="stale">{{ stale }} 句段素材对应旧文稿或表演要求。</span>
     </p>
     <div class="chapter-transport">
       <button
         type="button"
         :disabled="!items.length || index === 0"
-        aria-label="上一章"
+        aria-label="上一句段"
         @click="choose(index - 1)"
       >
         ←</button
@@ -171,17 +173,17 @@ onBeforeUnmount(pause);
       ><button
         type="button"
         :disabled="!items.length || index >= items.length - 1"
-        aria-label="下一章"
+        aria-label="下一句段"
         @click="choose(index + 1)"
       >
         →
       </button>
     </div>
-    <ChapterMediaPreview
+    <SegmentMediaPreview
       v-if="current"
       :key="current.id"
       ref="preview"
-      :chapter="current"
+      :segment="current"
       :master-gain="project.masterGain"
       compact
       @starting="transportStarting"
@@ -190,7 +192,7 @@ onBeforeUnmount(pause);
       @time="emit('time', $event)"
     />
     <div v-if="gapLeft > 0" class="gap-transport">
-      <span>章节间停顿 · {{ gapLeft.toFixed(1) }}s</span
+      <span>句段间停顿 · {{ gapLeft.toFixed(1) }}s</span
       ><button type="button" @click="playing ? pause() : play()">
         {{ playing ? "暂停" : "继续" }}</button
       ><button type="button" @click="stop">停止</button>

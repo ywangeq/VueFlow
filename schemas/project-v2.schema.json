@@ -1,0 +1,436 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ywangeq/VueFlow/schemas/project-v2.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "revision",
+    "masterGain",
+    "updatedAt",
+    "graph",
+    "chapters",
+    "jobs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "masterGain": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d\\d-\\d\\dT.+(?:Z|[+-]\\d\\d:\\d\\d)$",
+      "maxLength": 40
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "theme",
+        "columnWidth",
+        "rowGap"
+      ],
+      "properties": {
+        "layout": {
+          "const": "chapter-segments"
+        },
+        "theme": {
+          "const": "scifi"
+        },
+        "columnWidth": {
+          "type": "number",
+          "minimum": 160,
+          "maximum": 640
+        },
+        "rowGap": {
+          "type": "number",
+          "minimum": 80,
+          "maximum": 600
+        }
+      }
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/chapter"
+      },
+      "maxItems": 200
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/job"
+      },
+      "maxItems": 5000
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "url",
+        "duration",
+        "createdAt",
+        "textSnapshot"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "kind": {
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(?:/media/|media/)[a-zA-Z0-9_-]+(?:\\.[a-zA-Z0-9_-]+)*$",
+          "maxLength": 240
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "createdAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT.+(?:Z|[+-]\\d\\d:\\d\\d)$",
+          "maxLength": 40
+        },
+        "jobId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "textSnapshot": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "directionSnapshot": {
+          "type": "string",
+          "maxLength": 10000
+        }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "versionId",
+        "time",
+        "createdAt",
+        "resolved"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "versionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "createdAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT.+(?:Z|[+-]\\d\\d:\\d\\d)$",
+          "maxLength": 40
+        },
+        "resolved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "versionId",
+        "time"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "versionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "resolved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "text",
+        "direction",
+        "enabled",
+        "gain",
+        "gap",
+        "approvedVersionIds",
+        "activeAudioId",
+        "activeVideoId",
+        "versions",
+        "comments"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "direction": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "derivedFromId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "gain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "approvedVersionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+          },
+          "maxItems": 1000
+        },
+        "activeAudioId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activeVideoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/asset"
+          },
+          "maxItems": 1000
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comment"
+          },
+          "maxItems": 1000
+        }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "segments"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/segment"
+          },
+          "maxItems": 2000
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "segmentId",
+        "kind",
+        "status",
+        "textSnapshot",
+        "directionSnapshot",
+        "baseVersionId",
+        "commentIds",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "segmentId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "kind": {
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "status": {
+          "enum": [
+            "awaiting_external",
+            "completed",
+            "cancelled"
+          ]
+        },
+        "textSnapshot": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "directionSnapshot": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "baseVersionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+          },
+          "maxItems": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT.+(?:Z|[+-]\\d\\d:\\d\\d)$",
+          "maxLength": 40
+        },
+        "completedVersionId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$"
+        },
+        "baseApprovedSnapshot": {
+          "type": "boolean"
+        },
+        "commentSnapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/snapshot"
+          },
+          "maxItems": 1000
+        }
+      }
+    }
+  }
+}

@@ -4,171 +4,123 @@ import RelationGraph, {
   type GraphLink,
   type GraphNode,
 } from "../vendor/scaffold/components/charts/RelationGraph.vue";
-import type { Chapter } from "../domain/types";
-import { combinedChapterStatus } from "../domain/project";
+import type { Chapter, Segment, GraphConfig } from "../domain/types";
+import { combinedChapterStatus, groupStatus } from "../domain/project";
 
 const props = defineProps<{
   chapters: Chapter[];
-  selectedId: string | null;
+  selectedSegmentId: string | null;
+  scopeChapterId: string | null;
+  graph: GraphConfig;
   projectTitle: string;
 }>();
-const emit = defineEmits<{ select: [id: string] }>();
+const emit = defineEmits<{
+  selectSegment: [id: string];
+  selectChapter: [id: string | null];
+}>();
 const view = ref<"graph" | "list">("graph");
 const size = ref({ w: 760, h: 600 });
-const columns = computed(() =>
-  Math.max(1, Math.min(3, Math.floor(size.value.w / 190))),
-);
-const height = computed(() =>
-  Math.max(480, 240 + Math.ceil(props.chapters.length / columns.value) * 180),
-);
-
-function chapterState(chapter: Chapter) {
-  // The domain helper owns validity and approval policy for both the outline and graph.
-  const status = combinedChapterStatus(chapter);
-  if (status === "待生成")
-    return { text: status, tone: "accent" as const, ratio: 0 };
-  if (status === "待更新")
-    return { text: status, tone: "danger" as const, ratio: 0.25 };
-  if (status === "待修改")
-    return { text: status, tone: "danger" as const, ratio: 0.5 };
-  if (status === "已通过")
-    return { text: status, tone: "lime" as const, ratio: 1 };
-  return {
-    text: status,
-    tone: "accent" as const,
-    ratio: 0.75,
-  };
+const scope = computed(() => props.chapters.find((chapter) => chapter.id === props.scopeChapterId) ?? null);
+const columnWidth = computed(() => Math.max(160, Math.min(640, Number(props.graph.columnWidth) || 220)));
+const rowGap = computed(() => Math.max(80, Math.min(600, Number(props.graph.rowGap) || 180)));
+const compactLayout = computed(() => rowGap.value < 150);
+const columns = computed(() => Math.max(1, Math.min(4, Math.floor(size.value.w / columnWidth.value))));
+const coreId = computed(() => scope.value ? `__chapter__:${scope.value.id}` : "__project__");
+function stateFor(status: string) {
+  if (status === "已停用") return { text: status, tone: "off" as const, ratio: 0 };
+  if (status === "待生成") return { text: status, tone: "accent" as const, ratio: 0 };
+  if (status === "待更新") return { text: status, tone: "danger" as const, ratio: .25 };
+  if (status === "待修改") return { text: status, tone: "danger" as const, ratio: .5 };
+  if (status === "已通过") return { text: status, tone: "lime" as const, ratio: 1 };
+  return { text: status, tone: "accent" as const, ratio: .75 };
 }
-function mediaCounts(chapter: Chapter) {
-  const audio = chapter.versions.filter(
-    (version) => version.kind === "audio",
-  ).length;
-  const video = chapter.versions.filter(
-    (version) => version.kind === "video",
-  ).length;
+function mediaCounts(segment: Segment) {
+  const audio = segment.versions.filter((version) => version.kind === "audio").length;
+  const video = segment.versions.filter((version) => version.kind === "video").length;
   return `音频 ${audio}版 · 视频 ${video}版`;
 }
+const entries = computed(() => scope.value
+  ? scope.value.segments.map((segment) => ({
+      id: segment.id, title: segment.title, enabled: segment.enabled,
+      state: stateFor(segment.enabled ? combinedChapterStatus(segment) : "已停用"),
+      detail: mediaCounts(segment), count: null as number | null,
+    }))
+  : props.chapters.map((chapter) => {
+      const enabled = chapter.segments.filter((segment) => segment.enabled).length;
+      return { id: chapter.id, title: chapter.title, enabled: enabled > 0,
+        state: stateFor(groupStatus(chapter)), detail: `${enabled} 个启用句段`, count: enabled };
+    }));
+const height = computed(() => Math.max(480, 240 + Math.ceil(entries.value.length / columns.value) * rowGap.value));
+const activeId = computed(() => scope.value ? props.selectedSegmentId : props.chapters.find((chapter) => chapter.segments.some((segment) => segment.id === props.selectedSegmentId))?.id ?? null);
 const nodes = computed<GraphNode[]>(() => {
   const w = size.value.w || 760;
-  const result: GraphNode[] = [
-    {
-      id: "__project__",
-      x: w / 2,
-      y: 104,
-      label: props.projectTitle || "未命名工程",
-      sub: `${props.chapters.length} 个章节 · 音视频共用工作流`,
-      kind: "core",
-      size: 88,
-      interactive: false,
-      title: props.projectTitle,
-    },
-  ];
-  props.chapters.forEach((chapter, index) => {
+  const result: GraphNode[] = [{
+    id: coreId.value, x: w / 2, y: 104,
+    label: scope.value?.title || props.projectTitle || "未命名工程",
+    sub: scope.value ? `${scope.value.segments.filter((segment) => segment.enabled).length} 个启用句段 · 旁白与画面共用节点` : `${props.chapters.length} 个章节 · 点击下钻句段`,
+    kind: "core", size: 88, interactive: false,
+    title: scope.value?.title || props.projectTitle,
+  }];
+  entries.value.forEach((entry, index) => {
     const row = Math.floor(index / columns.value);
-    const rowCount = Math.min(
-      columns.value,
-      props.chapters.length - row * columns.value,
-    );
-    const col = index % columns.value;
-    const state = chapterState(chapter);
-    const media = mediaCounts(chapter);
+    const rowCount = Math.min(columns.value, entries.value.length - row * columns.value);
     result.push({
-      id: chapter.id,
-      x: ((col + 0.5) * w) / rowCount,
-      y: 280 + row * 180,
-      label: `${String(index + 1).padStart(2, "0")}  ${chapter.title || "未命名章节"}`,
-      sub: `${state.text}\n${media}`,
-      kind: "hub",
-      size: 88,
-      count: String(index + 1).padStart(2, "0"),
-      tone: state.tone,
-      ratio: state.ratio,
-      icon: "layers",
-      from: "__project__",
-      delay: Math.min(index * 0.045, 0.5),
-      title: `${chapter.title}：${state.text}，${media}`,
+      id: entry.id, x: ((index % columns.value + (compactLayout.value ? .15 : .5)) * w) / rowCount,
+      y: 280 + row * rowGap.value,
+      label: `${String(index + 1).padStart(2, "0")}  ${entry.title || "未命名"}`,
+      sub: `${entry.state.text}\n${entry.detail}`, kind: "hub", size: compactLayout.value ? 36 : 88,
+      count: entry.count ?? String(index + 1).padStart(2, "0"),
+      tone: entry.state.tone, ratio: entry.state.ratio,
+      icon: scope.value ? "layers" : "dept", from: coreId.value,
+      delay: Math.min(index * .045, .5),
+      title: `${entry.title}：${entry.state.text}，${entry.detail}${scope.value ? "" : "，点击查看句段"}`,
     });
   });
   return result;
 });
-const links = computed<GraphLink[]>(() =>
-  props.chapters.map((chapter) => ({
-    a: "__project__",
-    b: chapter.id,
-    shape: "v",
-    flow: "forward",
-    tone: chapterState(chapter).tone,
-  })),
-);
+const links = computed<GraphLink[]>(() => entries.value.map((entry) => ({
+  a: coreId.value, b: entry.id, shape: "v", flow: entry.enabled ? "forward" : "none",
+  tone: entry.state.tone === "off" ? "accent" : entry.state.tone,
+  dashed: !entry.enabled,
+})));
+function select(id: string) {
+  if (scope.value) emit("selectSegment", id);
+  else emit("selectChapter", id);
+}
 function selectNode(node: GraphNode) {
-  if (props.chapters.some((chapter) => chapter.id === node.id))
-    emit("select", node.id);
+  if (entries.value.some((entry) => entry.id === node.id)) select(node.id);
 }
 </script>
 
 <template>
-  <section class="chapter-graph" aria-label="章节工作流">
+  <section class="chapter-graph" :class="{ 'is-compact-layout': compactLayout }" aria-label="章节与句段工作流">
     <div class="graph-topline">
-      <span class="graph-title"
-        ><i aria-hidden="true"></i>章节关系<span class="graph-count"
-          >{{ chapters.length }} 个节点</span
-        ></span
-      >
+      <span class="graph-title"><i aria-hidden="true"></i>{{ scope ? '句段关系' : '章节关系' }}<span class="graph-count">{{ entries.length }} 个节点</span></span>
       <div class="view-toggle" role="group" aria-label="工作流视图">
-        <button
-          type="button"
-          :aria-pressed="view === 'graph'"
-          @click="view = 'graph'"
-        >
-          节点
-        </button>
-        <button
-          type="button"
-          :aria-pressed="view === 'list'"
-          @click="view = 'list'"
-        >
-          列表
-        </button>
+        <button type="button" :aria-pressed="view === 'graph'" @click="view = 'graph'">节点</button>
+        <button type="button" :aria-pressed="view === 'list'" @click="view = 'list'">列表</button>
       </div>
     </div>
-    <p v-if="!chapters.length" class="graph-empty">
-      添加文稿并拆分章节，即可开始构建。
-    </p>
+    <nav v-if="scope" class="graph-breadcrumb" aria-label="图谱层级">
+      <button type="button" @click="emit('selectChapter', null)">← 全部章节</button>
+      <span aria-hidden="true">/</span><span>{{ scope.title }}</span>
+    </nav>
+    <p v-if="!entries.length" class="graph-empty">{{ scope ? '在本章添加句段，开始构建。' : '导入文稿或添加章节，开始构建。' }}</p>
     <div v-else-if="view === 'graph'" class="graph-scroll">
-      <RelationGraph
-        v-model:size="size"
-        :style="{ height: `${height}px` }"
-        :nodes="nodes"
-        :links="links"
-        :active-id="selectedId"
-        variant="stage"
-        :label="`${projectTitle}，音视频章节节点；使用 Tab 或方向键选择章节`"
-        @select="selectNode"
-      />
+      <RelationGraph v-model:size="size" :style="{ height: `${height}px` }" :nodes="nodes" :links="links" :active-id="activeId" variant="stage"
+        :label="`${scope?.title || projectTitle}，${scope ? '句段' : '章节'}节点；使用 Tab 或方向键选择，Esc 返回全部章节`"
+        @select="selectNode" @back="emit('selectChapter', null)" />
     </div>
     <ol v-else class="graph-chapter-list">
-      <li v-for="(chapter, index) in chapters" :key="chapter.id">
-        <button
-          type="button"
-          :aria-pressed="selectedId === chapter.id"
-          @click="emit('select', chapter.id)"
-        >
-          <span class="graph-chapter-index">{{
-            String(index + 1).padStart(2, "0")
-          }}</span>
-          <span class="graph-chapter-copy">
-            <span class="chapter-name">{{
-              chapter.title || "未命名章节"
-            }}</span>
-            <span class="graph-media-counts">{{ mediaCounts(chapter) }}</span>
-          </span>
-          <span class="chapter-status">{{ chapterState(chapter).text }}</span>
+      <li v-for="(entry, index) in entries" :key="entry.id">
+        <button type="button" :aria-pressed="activeId === entry.id" @click="select(entry.id)">
+          <span class="graph-chapter-index">{{ String(index + 1).padStart(2, '0') }}</span>
+          <span class="graph-chapter-copy"><span class="chapter-name">{{ entry.title || '未命名' }}</span><span class="graph-media-counts">{{ entry.detail }}</span></span>
+          <span class="chapter-status">{{ entry.state.text }}</span>
         </button>
       </li>
     </ol>
-    <p v-if="chapters.length && view === 'graph'" class="graph-help">
-      同一节点管理旁白与画面 · 选中章节查看素材和评论
-    </p>
+    <p v-if="entries.length && view === 'graph'" class="graph-help">{{ scope ? '每个句段独立管理旁白与画面 · 停用节点保留素材历史' : '章节组织句段 · 点击章节查看可独立生成与返修的句段' }}</p>
   </section>
 </template>
 
@@ -191,6 +143,15 @@ function selectNode(node: GraphNode) {
   color-scheme: dark;
   min-width: 0;
 }
+.graph-breadcrumb {
+  display: flex; align-items: center; gap: 10px; font-size: 12px;
+  padding-bottom: 14px; color: var(--graph-muted); min-width: 0;
+}
+.graph-breadcrumb button {
+  flex-shrink: 0; border: 1px solid var(--graph-rule); border-radius: 5px;
+  background: var(--graph-panel); color: var(--graph-blue); padding: 6px 9px;
+}
+.graph-breadcrumb > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-topline {
   display: flex;
   align-items: center;
@@ -294,7 +255,7 @@ function selectNode(node: GraphNode) {
   font-size: 11px;
 }
 .chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-text) {
-  width: 170px;
+  width: min(170px, calc(v-bind(columnWidth) * 1px - 10px));
   box-sizing: border-box;
 }
 .chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-sub) {
@@ -446,4 +407,13 @@ button:focus-visible {
 .chapter-graph :deep(.rg-node.is-dim .rg-body) {
   opacity: 0.65;
 }
+.is-compact-layout :deep(.rg.is-stage .rg-node.is-hub .rg-text) {
+  top: 50%; left: calc(100% + 7px); translate: 0 -50%;
+  width: min(170px, calc(v-bind(columnWidth) * 1px - 68px)); padding: 3px 5px;
+}
+.is-compact-layout :deep(.rg.is-stage .rg-node.is-hub .rg-label) { max-width: 100%; font-size: 11px; }
+.is-compact-layout :deep(.rg.is-stage .rg-node.is-hub .rg-sub) { font-size: 9px; }
+.is-compact-layout :deep(.rg.is-stage .rg-node.is-hub .rg-count) { font-size: 12px; }
+.is-compact-layout :deep(.rg.is-stage .rg-node.is-hub .rg-dot) { display: none; }
+
 </style>
