@@ -1,0 +1,232 @@
+.rg {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line-strong);
+  background:
+    radial-gradient(55% 50% at 50% 46%, var(--ambient-b), transparent 72%),
+    radial-gradient(40% 40% at 12% 90%, var(--ambient-a), transparent 70%),
+    var(--surface-solid);
+  box-shadow: var(--edge), var(--e1);
+  outline: none;
+}
+.rg.is-pannable { cursor: grab; touch-action: none; }
+.rg-stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rg-layer { position: absolute; inset: 0; transform-origin: 0 0; }
+.rg-links { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.rg-link { color: var(--thread-active); }
+.rg-link.cat-1, .rg-link.cat-2, .rg-link.cat-3, .rg-link.cat-4, .rg-link.cat-5 { color: color-mix(in srgb, var(--cat-ink) 75%, transparent); }
+.rg-link.is-danger { color: var(--red-text); }
+.rg-link.is-lime { color: var(--leaf-text); }
+.rg-path { fill: none; stroke: var(--thread); stroke-width: 1.2; stroke-linecap: round; transition: stroke .3s, stroke-width .3s; }
+.rg-link.is-dashed .rg-path { stroke-dasharray: 3 4; }
+.rg-link.is-lit .rg-path, .rg-link.is-active .rg-path { stroke: currentColor; stroke-width: 1.6; }
+.rg-link.is-danger .rg-path { stroke: color-mix(in srgb, var(--red-text) 55%, transparent); }
+.rg-link.is-dim .rg-path { stroke-opacity: .35; }
+.rg-pulse { fill: currentColor; opacity: 0; stroke: var(--pulse-halo); stroke-width: 6; paint-order: stroke; }
+.rg-pulse.is-back { fill: var(--leaf-text); stroke: rgba(130, 221, 45, .2); }
+
+.rg-node {
+  position: absolute; left: 0; top: 0; width: 0; height: 0;
+  padding: 0; border: 0; background: none; color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+  will-change: transform, opacity; opacity: 0;
+  z-index: 1;
+}
+.rg-node.is-static { cursor: default; }
+.rg-node.is-active, .rg-node:hover, .rg-node:focus-visible { z-index: 3; }
+.rg-node:focus-visible { outline: none; }
+.rg-node:focus-visible .rg-body { outline: 2px solid var(--focus); outline-offset: 3px; }
+.rg-body {
+  position: absolute; left: 0; top: 0;
+  display: inline-flex; align-items: center; gap: 8px;
+  white-space: nowrap;
+  translate: -50% -50%;
+  transition: opacity .3s, box-shadow .3s, border-color .3s, background .3s, translate .3s;
+}
+.rg-node.align-left .rg-body { translate: -7px -50%; }
+.rg-node.align-right .rg-body { translate: calc(-100% + 7px) -50%; flex-direction: row-reverse; text-align: right; }
+.rg-node.is-dim .rg-body { opacity: .26; }
+.rg-dot {
+  flex: none; display: grid; place-items: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--node-bg);
+  border: 1.5px solid var(--cat-ink, var(--blue));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--cat-ink, var(--blue)) 12%, transparent);
+  color: var(--cat-ink, var(--blue));
+}
+.rg-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.rg-label { font-size: 12.5px; font-weight: 620; letter-spacing: -.005em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.rg-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.rg-badge { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px; color: var(--cat-ink, var(--ink-soft)); background: var(--cat-bg, var(--hover-bg)); }
+
+/* item：胶囊 */
+.rg-node.is-item .rg-body {
+  padding: 5px 11px 5px 6px; border-radius: 999px;
+  background: var(--node-bg); border: 1px solid var(--line-strong);
+  box-shadow: var(--edge), var(--e1);
+}
+.rg-node.is-item:hover .rg-body, .rg-node.is-item.is-active .rg-body { border-color: color-mix(in srgb, var(--cat-ink, var(--blue)) 55%, transparent); box-shadow: var(--edge), var(--e2); }
+.rg-node.is-item.is-active .rg-dot { background: var(--cat-ink, var(--blue)); }
+
+/* dot：只有圆点，标签悬停 / 激活时出现 */
+.rg-node.is-dot .rg-dot { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--cat-ink, var(--blue)) 12%, transparent); }
+.rg-node.is-dot .rg-body { gap: 6px; }
+.rg-node.is-dot .rg-text { position: absolute; left: 16px; top: 50%; translate: 0 -50%; padding: 3px 8px; border-radius: var(--r-xs); background: var(--float-bg); box-shadow: var(--float-inset), var(--e2); opacity: 0; pointer-events: none; transition: opacity .2s; backdrop-filter: blur(12px); }
+.rg-node.is-dot:hover .rg-text, .rg-node.is-dot:focus-visible .rg-text, .rg-node.is-dot.is-active .rg-text { opacity: 1; }
+.rg-node.is-dot.is-active .rg-dot { background: var(--cat-ink, var(--blue)); }
+
+/* hub：能力岛卡 */
+.rg-node.is-hub .rg-body {
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "dot count" "text text";
+  column-gap: 10px; row-gap: 4px; min-width: 150px; padding: 12px 16px 13px;
+  border-radius: var(--r-lg); background: var(--pill-bg); border: 1px solid var(--glass-line);
+  box-shadow: var(--pill-inset), var(--edge), var(--e2); backdrop-filter: blur(16px) saturate(1.2);
+}
+.rg-node.is-hub .rg-dot { grid-area: dot; width: 26px; height: 26px; border-radius: var(--r-xs); background: var(--cat-bg, var(--blue-soft)); border: 0; box-shadow: none; }
+.rg-node.is-hub .rg-count { grid-area: count; justify-self: end; font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -.03em; color: var(--ink); }
+.rg-node.is-hub .rg-text { grid-area: text; }
+.rg-node.is-hub .rg-label { font-size: 13.5px; font-weight: 700; }
+.rg-node.is-hub:hover .rg-body, .rg-node.is-hub.is-active .rg-body { box-shadow: var(--pill-inset), var(--edge), var(--e3); border-color: color-mix(in srgb, var(--cat-ink, var(--blue)) 40%, var(--glass-line)); }
+
+/* core：深色中心盘 + 呼吸光环 */
+.rg-node.is-core .rg-body {
+  flex-direction: column; justify-content: center; gap: 6px;
+  width: 112px; height: 112px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #2a3136, var(--plate-bg) 70%);
+  color: var(--plate-ink); text-align: center;
+  box-shadow: 0 0 0 1px var(--plate-line), 0 18px 40px rgba(var(--shade), .22);
+}
+.rg-node.is-core .rg-body::before {
+  content: ""; position: absolute; inset: -18px; border-radius: 50%; z-index: -1;
+  background: radial-gradient(circle closest-side, var(--pulse-halo), transparent);
+  animation: rg-breathe 5.5s ease-in-out infinite;
+}
+.rg-node.is-core .rg-dot { width: auto; height: auto; border: 0; box-shadow: none; background: none; color: var(--lime); }
+.rg-node.is-core .rg-text { align-items: center; }
+.rg-node.is-core .rg-label { font-size: 13px; font-weight: 700; }
+.rg-node.is-core .rg-sub { color: var(--plate-soft); }
+@keyframes rg-breathe { 50% { transform: scale(1.12); opacity: .6; } }
+
+.rg-node.tone-danger { --cat-ink: var(--red-text); --cat-bg: var(--red-soft); }
+.rg-node.tone-lime { --cat-ink: var(--leaf-text); --cat-bg: var(--lime-soft); }
+.rg-node.tone-accent { --cat-ink: var(--blue); --cat-bg: var(--blue-soft); }
+.rg-node.tone-off .rg-body { opacity: .5; }
+.rg-node.tone-off .rg-label { text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+
+.rg-corner { position: absolute; z-index: 5; max-width: min(340px, calc(50% - 32px)); cursor: default; }
+.rg-corner:empty { display: none; }
+.rg-corner.is-tl { left: 16px; top: 16px; }
+.rg-corner.is-tr { right: 16px; top: 16px; }
+.rg-corner.is-bl { left: 16px; bottom: 16px; }
+.rg-corner.is-br { right: 16px; bottom: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rg-node.is-core .rg-body::before { animation: none; }
+}
+
+/* ── 图谱舞台 variant="stage"（珍珠玻璃）：珍珠球 / 刻度表盘 / 圆点 / 光柱画在 Canvas，DOM 只留标签与命中区 ── */
+.rg.is-stage {
+  background:
+    radial-gradient(circle, rgba(var(--shade), .07) 1px, transparent 1.2px) 0 0 / 22px 22px,
+    radial-gradient(55% 50% at 50% 46%, var(--ambient-b), transparent 72%),
+    radial-gradient(40% 40% at 10% 92%, var(--ambient-a), transparent 70%),
+    var(--surface-solid);
+}
+:root[data-theme="dark"] .rg.is-stage {
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, .06) 1px, transparent 1.2px) 0 0 / 22px 22px,
+    radial-gradient(55% 50% at 50% 46%, var(--ambient-b), transparent 72%),
+    var(--surface-solid);
+}
+
+/* core：珍珠球画在 Canvas，名称落在球下 */
+.rg.is-stage .rg-node.is-core::before,
+.rg.is-stage .rg-node.is-hub::before {
+  content: ""; position: absolute; border-radius: 50%;
+  width: var(--size, 96px); height: var(--size, 96px);
+  left: calc(var(--size, 96px) / -2); top: calc(var(--size, 96px) / -2);
+}
+.rg.is-stage .rg-node.is-core .rg-body {
+  width: auto; height: auto; padding: 0; gap: 1px; background: none; box-shadow: none; border-radius: 0; color: var(--ink);
+  translate: -50% calc(var(--size, 96px) / 2 + 26px);
+}
+.rg.is-stage .rg-node.is-core .rg-body::before { display: none; }
+.rg.is-stage .rg-node.is-core .rg-dot { display: none; }
+.rg.is-stage .rg-node.is-core .rg-label { font-size: 14px; font-weight: 700; }
+.rg.is-stage .rg-node.is-core .rg-sub { color: var(--ink-faint); }
+
+/* hub：玻璃刻度表盘画在 Canvas；图标与读数居中，名称与说明落在表盘下 */
+.rg.is-stage .rg-node.is-hub .rg-body {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: var(--size, 104px); height: var(--size, 104px); min-width: 0; padding: 0;
+  translate: -50% -50%; border: 0; border-radius: 50%; background: none; box-shadow: none; backdrop-filter: none;
+}
+.rg.is-stage .rg-node.is-hub .rg-dot { width: auto; height: auto; background: none; color: var(--cat-ink, var(--blue)); }
+.rg.is-stage .rg-node.is-hub .rg-count { font-size: calc(var(--size, 104px) * .2); line-height: 1; color: var(--ink); }
+.rg.is-stage .rg-node.is-hub .rg-text {
+  position: absolute; top: calc(100% + 10px); left: 50%; translate: -50% 0; align-items: center; text-align: center;
+  padding: 2px 8px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--surface-solid) 86%, transparent);
+}
+.rg.is-stage .rg-node.is-hub .rg-label { font-size: 13.5px; font-weight: 700; }
+.rg.is-stage .rg-node.is-hub .rg-sub { font-family: inherit; font-size: 11.5px; max-width: 180px; }
+.rg.is-stage .rg-node.is-hub:hover .rg-body,
+.rg.is-stage .rg-node.is-hub.is-active .rg-body { box-shadow: none; border-color: transparent; }
+.rg.is-stage .rg-node.is-hub:hover .rg-label,
+.rg.is-stage .rg-node.is-hub.is-active .rg-label { color: var(--cat-ink, var(--blue)); }
+.rg.is-stage .rg-node.is-hub:focus-visible .rg-body { outline-offset: 6px; border-radius: 50%; }
+
+/* dot：Canvas 画圆点，DOM 只留 18px 命中区与悬停标签 */
+.rg.is-stage .rg-node.is-dot .rg-dot { width: 18px; height: 18px; background: none; border: 0; box-shadow: none; }
+
+/* slab：岗位台阶，浅色玻璃台面 + 上沿分类色细带 */
+.rg.is-stage .rg-node.is-slab .rg-body {
+  flex-direction: column; gap: 2px; width: var(--size, 140px); padding: 12px 10px;
+  border-radius: var(--r-md); text-align: center; white-space: normal;
+  background: var(--pill-bg); border: 1px solid var(--glass-line);
+  box-shadow: var(--pill-inset), var(--edge), var(--e2);
+  backdrop-filter: blur(14px) saturate(1.15);
+}
+.rg.is-stage .rg-node.is-slab .rg-body::before {
+  content: ""; position: absolute; left: 16px; right: 16px; top: -1px; height: 3px; border-radius: 0 0 3px 3px;
+  background: var(--cat-ink);
+}
+.rg.is-stage .rg-node.is-slab .rg-dot { display: none; }
+.rg.is-stage .rg-node.is-slab .rg-text { align-items: center; }
+.rg-rank { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; color: var(--cat-ink, var(--ink-faint)); }
+.rg.is-stage .rg-node.is-slab .rg-count { font-family: var(--font-mono); font-size: 26px; font-weight: 600; letter-spacing: -.03em; line-height: 1.1; }
+.rg.is-stage .rg-node.is-slab .rg-count::after { content: " 人"; font-size: 11px; font-weight: 500; color: var(--ink-faint); letter-spacing: 0; }
+.rg.is-stage .rg-node.is-slab .rg-label { font-size: 13.5px; font-weight: 680; max-width: 100%; }
+.rg.is-stage .rg-node.is-slab .rg-sub { max-width: 100%; }
+.rg.is-stage .rg-node.is-slab:hover .rg-body,
+.rg.is-stage .rg-node.is-slab.is-active .rg-body { border-color: color-mix(in srgb, var(--cat-ink) 40%, var(--glass-line)); box-shadow: var(--pill-inset), var(--edge), 0 0 0 4px color-mix(in srgb, var(--cat-ink) 10%, transparent), var(--e3); }
+.rg.is-stage .rg-node.is-slab.is-dim .rg-body { opacity: .6; }
+.rg.is-stage .rg-node.is-slab.tone-off .rg-label { text-decoration: line-through; }
+
+.rg-corner.is-tr { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.rg-tools { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; border: 1px solid var(--glass-line); background: var(--float-bg); box-shadow: var(--float-inset), var(--e1); backdrop-filter: blur(16px); }
+.rg-tools button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: none; color: var(--ink-soft); font: inherit; font-size: 11.5px; cursor: pointer; transition: color .2s, background .2s; }
+.rg-tools button:hover { color: var(--ink); background: var(--hover-bg); }
+.rg-tools button[aria-pressed="true"] { color: var(--ink); background: var(--press-bg); }
+
+/* Host token boundary: local to the vendored graph, never global application UI. */
+.rg {
+  --ink: #2e3a37; --ink-soft: #64736c; --ink-faint: #7b8881;
+  --blue: #5d8573; --blue-soft: #e7f0ea; --lime: #a4c56d;
+  --leaf-text: #5e845a; --lime-soft: #e9f2df; --red-text: #b86d58; --red-soft: #faece4;
+  --surface-solid: #f8faf6; --node-bg: #fff; --line-strong: #dde4dc;
+  --ambient-a: rgba(213, 231, 205, .22); --ambient-b: rgba(234, 239, 222, .3);
+  --shade: 38, 61, 48; --graph-ink: 57, 75, 64; --graph-accent: 93, 133, 115;
+  --graph-lime: 136, 169, 99; --graph-danger: 184, 109, 88;
+  --r-xl: 14px; --r-lg: 12px; --r-md: 10px; --r-xs: 5px;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --focus: #618765; --edge: inset 0 1px 0 #fff; --e1: 0 2px 5px #31492e05;
+  --e2: 0 6px 20px #31492e0a; --e3: 0 10px 25px #31492e12;
+  --glass-line: #dfe5dc; --pill-bg: #ffffffdb; --pill-inset: inset 0 1px 0 #fff;
+  --float-bg: #ffffffde; --float-inset: inset 0 1px 0 #fff; --hover-bg: #eff4ea; --press-bg: #e4eddc;
+  --thread: #c8d5c8; --thread-active: #6e8f75; --pulse-halo: #95b58c33;
+}
+.rg .rg-label { max-width: 170px; }
+.rg.is-stage .rg-node.is-hub .rg-label { max-width: 170px; }
+.rg.is-stage .rg-node.is-hub .rg-sub { max-width: 170px; }
+.rg .tnum { font-variant-numeric: tabular-nums; }

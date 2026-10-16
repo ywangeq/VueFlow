@@ -1,0 +1,11 @@
+# VueFlow 音视频工作台
+
+- Vue 3 + TypeScript + Vite，复用 scaffold 原版 RelationGraph.vue，保留第三方许可。不引入 React 桥接。
+- 项目仅供非商业用途；第三方代码继续遵循各自许可。不得改写第三方版权。
+- 领域对象以服务端 project 为唯一持久化来源：chapter、asset version、comment、generation job。画布坐标不决定章节播放顺序。
+- src/components 为界面，src/services 为媒体/HTTP边界，server 为本地持久化与任务执行；提供者差异放在适配边界。
+- data/ 保存私人素材及工程，必须忽略。禁止提交真实文稿、音色ID、凭据或个人音视频。
+- MiniMax 继续使用用户已授权的网页流程；本应用生成任务为待外部执行，不能伪装为已调用。评论不自动扣费，任务需明确触发，完成后导入文件绑定对应任务版本。
+- 每个返修保存输入快照、评论和基线版本；晚到的结果不得静默替换更新的版本。
+- 修改后运行 pnpm test、pnpm build，并在浏览器检查真实交互。未验证能力如实记录。
+- 用户已授权本任务使用 subagent 并在指定 GitHub 仓库开发。保持改动聚焦，不提交私人生成数据。

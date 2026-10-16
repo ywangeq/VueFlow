@@ -1,0 +1,34 @@
+/* Hallmark · source: scaffold pearl-glass · macrostructure: media workbench.
+ * pre-emit critique: P4 H4 E4 S5 R4 V4 */
+:root {
+  --color-bg: #f2f4f7;
+  --color-surface: #fff;
+  --color-soft: #f7f8fa;
+  --color-text: #263345;
+  --color-muted: #687487;
+  --color-faint: #8b95a4;
+  --color-accent: #3465bc;
+  --color-accent-soft: #eaf0fc;
+  --color-line: #e1e5ec;
+  --color-success: #28745e;
+  --color-success-soft: #e7f3ed;
+  --color-warning: #956312;
+  --color-warning-soft: #fff5de;
+  --color-danger: #a93d45;
+  --color-danger-soft: #fff0f1;
+  --font-body: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Avenir Next", "PingFang SC", system-ui, sans-serif;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --shadow-panel: 0 8px 30px #24395c08;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+}

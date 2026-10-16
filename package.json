@@ -1,0 +1,30 @@
+{
+  "name": "vueflow-media-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "章节驱动的本地音视频构建与审听工作台",
+  "license": "LicenseRef-NonCommercial",
+  "scripts": {
+    "dev": "node server/dev.mjs",
+    "build": "vue-tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "gsap": "3.15.0",
+    "vue": "3.5.43"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "prettier": "3.6.2",
+    "typescript": "~5.7.2",
+    "vite": "6.4.2",
+    "vue-tsc": "^2.2.0"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
