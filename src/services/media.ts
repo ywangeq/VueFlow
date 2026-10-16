@@ -25,6 +25,86 @@ export function selectedVersion(
     ) ?? null
   );
 }
+export function chapterPlayback(chapter: Project["chapters"][number]) {
+  const audio = selectedVersion(chapter, "audio"),
+    video = selectedVersion(chapter, "video");
+  return {
+    audio,
+    video,
+    duration: Math.max(audio?.duration ?? 0, video?.duration ?? 0),
+    muteVideo: !!audio,
+  };
+}
+
+/** Wait for decoded playback data without leaving listeners behind on cancel/unmount. */
+export function waitForMediaReady(
+  element: HTMLMediaElement,
+  signal: AbortSignal,
+  timeoutMs = 12000,
+): Promise<void> {
+  if (signal.aborted)
+    return Promise.reject(new DOMException("Playback cancelled", "AbortError"));
+  if (element.readyState >= 3 && !element.seeking) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const cleanup = () => {
+      clearTimeout(timer);
+      for (const name of ["canplay", "loadeddata", "seeked", "progress"])
+        element.removeEventListener(name, ready);
+      element.removeEventListener("error", failed);
+      signal.removeEventListener("abort", aborted);
+    };
+    const ready = () => {
+      if (element.readyState >= 3 && !element.seeking) {
+        cleanup();
+        resolve();
+      }
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error("媒体无法解码，请检查格式。"));
+    };
+    const aborted = () => {
+      cleanup();
+      reject(new DOMException("Playback cancelled", "AbortError"));
+    };
+    for (const name of ["canplay", "loadeddata", "seeked", "progress"])
+      element.addEventListener(name, ready);
+    element.addEventListener("error", failed);
+    signal.addEventListener("abort", aborted, { once: true });
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("等待媒体缓冲超时，请检查素材并重试。"));
+    }, timeoutMs);
+    ready();
+  });
+}
+
+/** Narration is the clock while present; a longer remaining video takes over at its end. */
+export function syncChapterMedia(
+  audio: HTMLMediaElement | null,
+  video: HTMLMediaElement | null,
+  tolerance = 0.065,
+): number {
+  const active = (element: HTMLMediaElement | null) =>
+    element && !element.ended && element.currentTime < element.duration - 0.001;
+  const master = active(audio)
+    ? audio
+    : active(video)
+      ? video
+      : audio && (!video || audio.duration >= video.duration)
+        ? audio
+        : video;
+  if (!master) return 0;
+  const time = master.currentTime;
+  for (const slave of [audio, video]) {
+    if (!slave || slave === master || time >= slave.duration) continue;
+    if (Math.abs(slave.currentTime - time) > tolerance)
+      slave.currentTime = time;
+  }
+  return time;
+}
+
 export function probeMedia(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const element = document.createElement(

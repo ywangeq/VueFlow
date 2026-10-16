@@ -1,6 +1,6 @@
 # 当前实现
 
-2026-10-16：本地音视频工作台首版。
+2026-10-16：统一章节节点。音视频不分工作区或 sheet；原工程的两个选用版本与评论无需迁移。
 
 ## 入口与归属
 
@@ -12,7 +12,8 @@
 | src/domain/script.ts | 章节标题解析，不修改朗读内容 |
 | src/components/ChapterGraph.vue | 原版 scaffold 图谱适配与可访问列表 |
 | src/components/ChapterInspector.vue | 正文／表现、评论、版本、任务导入 |
-| src/components/SequencePlayer.vue | 连播与单一播放所有权 |
+| src/components/SequencePlayer.vue | 统一音画章节连播与单一播放所有权 |
+| src/components/ChapterMediaPreview.vue | 共同起点、进度、双素材轨道，独立旁白覆盖视频原声 |
 | src/services/media.ts | 浏览器解码、增益与 WAV 混音导出 |
 | src/services/api.ts | 本机 HTTP 适配 |
 | server/index.mjs | 单实例工程持久化、并发修订、文件与任务权威 |
@@ -22,6 +23,7 @@
 
 - `project.chapters` 数组决定播放顺序；坐标仅展示布局。
 - 服务端不可变素材版本和生成快照为权威。前端不能通过保存伪造素材 URL、版本快照、任务完成状态。
+- 一个节点同时包含选中旁白和画面，时长取两者较长值；可只有一种素材。综合状态根据已选素材判断，不要求缺失的可选轨道。
 - 当前选择、验收版本和未解决评论决定章节显示状态。正文或表现要求改变会使已生成版本显示过期。
 - 生成任务状态为 awaiting_external / completed / cancelled，均反映本地交接状态，不代表远端服务正在生成。
 - 导入任务结果时比较原稿、表现要求、评论快照与基线版本；晚到结果保存但不自动激活。

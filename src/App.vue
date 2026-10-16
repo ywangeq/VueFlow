@@ -4,6 +4,8 @@ import type { Project, MediaKind, Chapter } from "./domain/types";
 import {
   activeVersion,
   chapterStatus,
+  combinedChapterStatus,
+  chapterDuration,
   newChapter,
   formatTime,
 } from "./domain/project";
@@ -15,8 +17,7 @@ import SequencePlayer from "./components/SequencePlayer.vue";
 import StudioIcon from "./components/StudioIcon.vue";
 import ScriptImport from "./components/ScriptImport.vue";
 const project = ref<Project | null>(null),
-  selectedId = ref<string | null>(null),
-  kind = ref<MediaKind>("audio");
+  selectedId = ref<string | null>(null);
 const busy = ref(false),
   dirty = ref(false),
   error = ref(""),
@@ -33,26 +34,32 @@ const chapter = computed(
 );
 const approved = computed(
   () =>
-    project.value?.chapters.filter(
-      (c) => chapterStatus(c, kind.value) === "已通过",
-    ).length ?? 0,
+    project.value?.chapters.filter((c) => combinedChapterStatus(c) === "已通过")
+      .length ?? 0,
 );
 const available = computed(
   () =>
-    project.value?.chapters.filter((c) => activeVersion(c, kind.value))
-      .length ?? 0,
+    project.value?.chapters.filter(
+      (c) => activeVersion(c, "audio") || activeVersion(c, "video"),
+    ).length ?? 0,
 );
 const duration = computed(() => {
   const playable =
-    project.value?.chapters.filter((c) => activeVersion(c, kind.value)) ?? [];
+    project.value?.chapters.filter(
+      (c) => activeVersion(c, "audio") || activeVersion(c, "video"),
+    ) ?? [];
   return playable.reduce(
     (sum, c, i) =>
-      sum +
-      (activeVersion(c, kind.value)?.duration ?? 0) +
-      (i < playable.length - 1 ? c.gap : 0),
+      sum + chapterDuration(c) + (i < playable.length - 1 ? c.gap : 0),
     0,
   );
 });
+const approvedAudio = computed(
+  () =>
+    project.value?.chapters.filter(
+      (c) => chapterStatus(c, "audio") === "已通过",
+    ).length ?? 0,
+);
 const pendingCount = computed(
   () =>
     project.value?.jobs.filter((j) => j.status === "awaiting_external")
@@ -142,15 +149,14 @@ function move(index: number, delta: number) {
   markDirty();
   save();
 }
-function queue(commentIds: string[]) {
+function queue(mediaKind: MediaKind, commentIds: string[]) {
   const id = selectedId.value;
-  const mediaKind = kind.value;
   if (!id) return;
   run(async () => {
     await flush();
     accept(await api.queue(id, { kind: mediaKind, commentIds }));
     notice.value =
-      "任务已保存：导出交接清单后由 Codex 在外部生成，完成后到「版本与任务」导入结果。";
+      "任务已保存：导出交接清单后由 Codex 在外部生成，完成后到「素材与任务」导入结果。";
   });
 }
 function cancel(jobId: string) {
@@ -160,10 +166,9 @@ function cancel(jobId: string) {
     notice.value = "任务已取消";
   });
 }
-function upload(file: File, jobId?: string) {
+function upload(file: File, mediaKind: MediaKind, jobId?: string) {
   const id = selectedId.value;
   if (!id) return;
-  const mediaKind = kind.value;
   run(async () => {
     await flush();
     const measured = await probeMedia(file);
@@ -180,8 +185,8 @@ function upload(file: File, jobId?: string) {
     const active = imported ? activeVersion(imported, mediaKind)?.id : null;
     notice.value =
       completed && completed !== active
-        ? "结果已保存为历史版本：任务基线已更新，保留了当前选用版本。可到「版本与任务」比较。"
-        : "素材已导入，旧版本仍可回看。请在「试听与评论」验收。";
+        ? "结果已保存为历史版本：任务基线已更新，保留了当前选用版本。可到「素材与任务」比较。"
+        : "素材已导入，旧版本仍可回看。请在「音画与评论」验收。";
   });
 }
 function exportMix() {
@@ -294,22 +299,8 @@ window.addEventListener("beforeunload", (event) => {
       </div>
     </header>
     <nav class="workspace-bar" aria-label="工作区">
-      <div class="media-switch">
-        <button
-          :class="{ active: kind === 'audio' }"
-          :aria-pressed="kind === 'audio'"
-          :disabled="busy"
-          @click="kind = 'audio'"
-        >
-          <StudioIcon name="audio" />音频构建</button
-        ><button
-          :class="{ active: kind === 'video' }"
-          :aria-pressed="kind === 'video'"
-          :disabled="busy"
-          @click="kind = 'video'"
-        >
-          <StudioIcon name="video" />视频构建
-        </button>
+      <div class="unified-workspace-label">
+        <StudioIcon name="nodes" />章节工作流<span>音画在同一节点构建</span>
       </div>
       <div class="workspace-context">
         <span class="local-indicator"></span>本地工作区<span class="divider"
@@ -373,10 +364,10 @@ window.addEventListener("beforeunload", (event) => {
                   ><span
                     class="tiny-dot"
                     :class="{
-                      'is-approved': chapterStatus(c, kind) === '已通过',
+                      'is-approved': combinedChapterStatus(c) === '已通过',
                     }"
                   ></span
-                  >{{ chapterStatus(c, kind) }}</small
+                  >{{ combinedChapterStatus(c) }}</small
                 ></span
               >
             </button>
@@ -425,14 +416,8 @@ window.addEventListener("beforeunload", (event) => {
       <main class="canvas-column">
         <div class="canvas-toolbar">
           <div>
-            <span class="eyebrow">{{
-              kind === "audio" ? "AUDIO WORKSPACE" : "VIDEO WORKSPACE"
-            }}</span>
-            <h1>
-              {{
-                kind === "audio" ? "让每一段，都说到位。" : "让声音，拥有画面。"
-              }}
-            </h1>
+            <span class="eyebrow">MEDIA WORKSPACE</span>
+            <h1>让声音与画面，一起成形。</h1>
           </div>
           <div class="progress-label">
             <strong
@@ -445,47 +430,38 @@ window.addEventListener("beforeunload", (event) => {
           <ChapterGraph
             :chapters="project.chapters"
             :selected-id="selectedId"
-            :kind="kind"
             :project-title="project.title"
             @select="selectedId = $event"
           />
         </div>
         <div class="canvas-summary">
           <span><span class="legend-dot ready"></span>已通过</span
-          ><span><span class="legend-dot review"></span>待试听 / 修改</span
+          ><span><span class="legend-dot review"></span>待审阅 / 修改</span
           ><span><span class="legend-dot missing"></span>待生成</span
           ><span class="summary-duration"
             >{{ available }} 段可播放 · {{ formatTime(duration) }}</span
           >
         </div>
-        <section class="sequence-section" aria-label="全文合成审听">
+        <section class="sequence-section" aria-label="音画连续预览">
           <div class="sequence-heading">
             <div>
-              <h2>{{ kind === "audio" ? "全文审听" : "章节视频预览" }}</h2>
-              <p>
-                {{
-                  kind === "audio"
-                    ? "按照章节顺序连播，试听每一次衔接。"
-                    : "按章节顺序播放已导入视频，保留音视频共用的审阅记录。"
-                }}
-              </p>
+              <h2>音画连续预览</h2>
+              <p>同一章节的旁白与画面共用播放进度，按章节顺序衔接。</p>
             </div>
             <button
-              v-if="kind === 'audio'"
               class="secondary small"
               :disabled="
                 busy ||
-                approved !== project.chapters.length ||
+                approvedAudio !== project.chapters.length ||
                 !project.chapters.length
               "
               @click="exportMix"
             >
-              <StudioIcon name="download" :size="16" />导出 WAV</button
-            ><span v-else class="status-pill">视频合成导出待接入</span>
+              <StudioIcon name="download" :size="16" />导出声音 WAV
+            </button>
           </div>
           <SequencePlayer
             :project="project"
-            :kind="kind"
             @select="selectedId = $event"
             @time="playhead = $event"
           /><label class="master-volume"
@@ -510,7 +486,6 @@ window.addEventListener("beforeunload", (event) => {
         :key="chapter.id"
         :chapter="chapter"
         :project="project"
-        :kind="kind"
         :busy="busy"
         :playhead="playhead"
         @dirty="markDirty"

@@ -1,232 +1,174 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from "vue";
-import type { MediaKind, Project } from "../domain/types";
+import type { Project } from "../domain/types";
 import {
   selectedVersion,
-  volume,
   claimPlayback,
   releasePlayback,
 } from "../services/media";
-const props = defineProps<{ project: Project; kind: MediaKind }>();
+import ChapterMediaPreview from "./ChapterMediaPreview.vue";
+const props = defineProps<{ project: Project }>();
 const emit = defineEmits<{
   select: [string];
   time: [{ chapterId: string; time: number; versionId: string }];
 }>();
 const items = computed(() =>
-  props.project.chapters.flatMap((chapter) => {
-    const version = selectedVersion(chapter, props.kind);
-    return version ? [{ chapter, version }] : [];
-  }),
+  props.project.chapters.filter(
+    (chapter) =>
+      selectedVersion(chapter, "audio") || selectedVersion(chapter, "video"),
+  ),
 );
 const missing = computed(
   () => props.project.chapters.length - items.value.length,
 );
+const missingAudio = computed(
+  () =>
+    props.project.chapters.filter(
+      (chapter) => !selectedVersion(chapter, "audio"),
+    ).length,
+);
+const missingVideo = computed(
+  () =>
+    props.project.chapters.filter(
+      (chapter) => !selectedVersion(chapter, "video"),
+    ).length,
+);
 const stale = computed(
   () =>
-    items.value.filter(
-      ({ chapter, version }) =>
-        chapter.text !== version.textSnapshot ||
-        (version.directionSnapshot !== undefined &&
-          chapter.direction !== version.directionSnapshot),
+    items.value.filter((chapter) =>
+      ["audio", "video"].some((kind) => {
+        const version = selectedVersion(chapter, kind as "audio" | "video");
+        return (
+          version &&
+          (version.textSnapshot !== chapter.text ||
+            (version.directionSnapshot !== undefined &&
+              version.directionSnapshot !== chapter.direction))
+        );
+      }),
     ).length,
 );
-const unapproved = computed(
-  () =>
-    items.value.filter(
-      ({ chapter, version }) =>
-        !chapter.approvedVersionIds.includes(version.id),
-    ).length,
-);
-const index = ref(0);
+const index = ref(0),
+  playing = ref(false),
+  gapLeft = ref(0);
 const current = computed(() => items.value[index.value]);
-const media = ref<HTMLMediaElement | null>(null);
-const playing = ref(false);
-const position = ref(0);
-const duration = ref(0);
-const gapLeft = ref(0);
-const error = ref("");
-let timer: ReturnType<typeof setInterval> | undefined;
-let gapTick = 0;
-let playRequest = 0;
-const owner = Symbol("sequence-player");
-const fmt = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+const preview = ref<InstanceType<typeof ChapterMediaPreview> | null>(null);
+const owner = Symbol("sequence-gap");
+let timer: ReturnType<typeof setInterval> | undefined,
+  tick = 0;
+let transition = 0;
 function clearTimer() {
   if (timer) clearInterval(timer);
   timer = undefined;
 }
 function pause() {
-  playRequest++;
+  transition++;
   playing.value = false;
-  media.value?.pause();
   clearTimer();
   releasePlayback(owner);
-}
-function mediaPaused(event: Event) {
-  if (
-    event.target === media.value &&
-    media.value?.paused &&
-    !media.value.ended &&
-    gapLeft.value <= 0
-  )
-    pause();
-}
-function stop() {
-  pause();
-  gapLeft.value = 0;
-  position.value = 0;
-  index.value = 0;
-  error.value = "";
-  if (media.value) media.value.currentTime = 0;
-  duration.value = current.value?.version.duration ?? 0;
-}
-function report(event?: Event) {
-  if (event && event.target !== media.value) return;
-  position.value = media.value?.currentTime ?? 0;
-  if (current.value)
-    emit("time", {
-      chapterId: current.value.chapter.id,
-      time: position.value,
-      versionId: current.value.version.id,
-    });
-}
-function applyVolume() {
-  if (media.value && current.value)
-    media.value.volume =
-      volume(current.value.chapter.gain) * volume(props.project.masterGain);
+  preview.value?.pause();
 }
 async function play() {
   if (!current.value) return;
-  error.value = "";
-  claimPlayback(owner, pause);
   playing.value = true;
-  const request = ++playRequest;
-  emit("select", current.value.chapter.id);
+  emit("select", current.value.id);
   if (gapLeft.value > 0) {
     startGap();
     return;
   }
-  await nextTick();
-  if (request !== playRequest) return;
-  applyVolume();
-  try {
-    await media.value?.play();
-  } catch {
-    if (request === playRequest) {
-      pause();
-      error.value = "播放失败，请检查媒体格式或再次点击播放。";
-    }
-  }
+  releasePlayback(owner);
+  await preview.value?.play();
+}
+function stop() {
+  pause();
+  gapLeft.value = 0;
+  index.value = 0;
+  preview.value?.stop();
 }
 async function choose(next: number, autoplay = playing.value) {
   pause();
   gapLeft.value = 0;
-  position.value = 0;
-  duration.value = 0;
   index.value = next;
+  const token = transition;
   await nextTick();
-  if (current.value) emit("select", current.value.chapter.id);
-  if (autoplay) await play();
+  if (token !== transition) return;
+  if (current.value) emit("select", current.value.id);
+  if (autoplay) void play();
 }
 function startGap() {
   clearTimer();
-  gapTick = performance.now();
+  claimPlayback(owner, pause);
+  tick = performance.now();
   timer = setInterval(() => {
     const now = performance.now();
-    gapLeft.value = Math.max(0, gapLeft.value - (now - gapTick) / 1000);
-    gapTick = now;
-    if (gapLeft.value <= 0) {
+    gapLeft.value = Math.max(0, gapLeft.value - (now - tick) / 1000);
+    tick = now;
+    if (!gapLeft.value) {
       clearTimer();
+      releasePlayback(owner);
       void choose(index.value + 1, true);
     }
   }, 50);
 }
-function ended(event: Event) {
-  if (event.target !== media.value || !playing.value) return;
+function ended() {
   if (index.value >= items.value.length - 1) {
     playing.value = false;
-    releasePlayback(owner);
     return;
   }
-  gapLeft.value = Math.max(0, current.value?.chapter.gap ?? 0);
+  playing.value = true;
+  gapLeft.value = Math.max(0, current.value?.gap ?? 0);
   if (gapLeft.value) startGap();
   else void choose(index.value + 1, true);
 }
-function seek(event: Event) {
-  if (!media.value) return;
-  gapLeft.value = 0;
+function transportStarting() {
   clearTimer();
-  media.value.currentTime = Number((event.target as HTMLInputElement).value);
-  report();
-  if (playing.value) void play();
+  releasePlayback(owner);
+  gapLeft.value = 0;
 }
-function loaded() {
-  duration.value = Number.isFinite(media.value?.duration)
-    ? media.value!.duration
-    : 0;
-  applyVolume();
+function transportPlaying(value: boolean) {
+  playing.value = value;
+  if (!value) {
+    clearTimer();
+    releasePlayback(owner);
+  } else {
+    gapLeft.value = 0;
+    clearTimer();
+    releasePlayback(owner);
+    if (current.value) emit("select", current.value.id);
+  }
 }
 watch(
   () =>
-    `${props.kind}:${props.project.id}:${props.project.chapters.map((chapter) => `${chapter.id}:${selectedVersion(chapter, props.kind)?.id ?? "-"}`).join("|")}`,
+    `${props.project.id}:${props.project.chapters.map((chapter) => `${chapter.id}:${chapter.activeAudioId}:${chapter.activeVideoId}`).join("|")}`,
   stop,
-);
-watch(
-  [media, () => current.value?.chapter.gain, () => props.project.masterGain],
-  applyVolume,
-  { flush: "post" },
 );
 onBeforeUnmount(pause);
 </script>
 <template>
-  <section class="sequence-player" aria-label="章节连续试听">
-    <div class="sequence-heading">
-      <strong>全片{{ kind === "audio" ? "审听" : "预览" }}</strong
-      ><span>{{ items.length }} / {{ project.chapters.length }} 章可播放</span>
+  <section class="sequence-player" aria-label="全文章节音视频预览">
+    <div class="sequence-status">
+      <span>{{ items.length }} / {{ project.chapters.length }} 章可播放</span
+      ><span>旁白与画面共用章节顺序</span>
     </div>
-    <p v-if="missing || stale || unapproved" class="notice" role="status">
-      <span v-if="missing">{{ missing }} 章缺少素材，试听将跳过。 </span
-      ><span v-if="stale">{{ stale }} 章对应旧文稿或表演要求。 </span
-      ><span v-if="unapproved">{{ unapproved }} 章尚未通过审听。</span>
+    <p
+      v-if="missing || missingAudio || missingVideo || stale"
+      class="notice"
+      role="status"
+    >
+      <span v-if="missing">{{ missing }} 章暂无素材，连播时跳过。 </span
+      ><span v-if="missingAudio">{{ missingAudio }} 章未添加旁白。 </span
+      ><span v-if="missingVideo">{{ missingVideo }} 章未添加画面。 </span
+      ><span v-if="stale">{{ stale }} 章素材对应旧文稿或表演要求。</span>
     </p>
-    <component
-      :is="kind === 'video' ? 'video' : 'audio'"
-      v-if="current"
-      :key="current.version.id"
-      ref="media"
-      :src="current.version.url"
-      preload="metadata"
-      playsinline
-      @pause="mediaPaused"
-      @loadedmetadata="loaded"
-      @timeupdate="report"
-      @ended="ended"
-      @error="
-        pause();
-        error = '媒体读取失败，连续播放已暂停，请检查当前章节素材。';
-      "
-    />
-    <div class="transport">
+    <div class="chapter-transport">
       <button
         type="button"
         :disabled="!items.length || index === 0"
         aria-label="上一章"
         @click="choose(index - 1)"
       >
-        ←
-      </button>
-      <button
-        type="button"
-        class="play"
-        :disabled="!items.length"
-        @click="playing ? pause() : play()"
-      >
-        {{ playing ? "暂停" : "播放" }}
-      </button>
-      <button type="button" :disabled="!items.length" @click="stop">
-        停止
-      </button>
-      <button
+        ←</button
+      ><strong>{{ current?.title ?? "等待导入素材" }}</strong
+      ><button
         type="button"
         :disabled="!items.length || index >= items.length - 1"
         aria-label="下一章"
@@ -234,114 +176,89 @@ onBeforeUnmount(pause);
       >
         →
       </button>
-      <span class="current-title">{{
-        current?.chapter.title ?? "等待导入素材"
-      }}</span>
-      <span class="clock">{{
-        gapLeft > 0
-          ? `停顿 ${gapLeft.toFixed(1)}s`
-          : `${fmt(position)} / ${fmt(duration)}`
-      }}</span>
     </div>
-    <input
-      aria-label="当前章节进度"
-      type="range"
-      min="0"
-      :max="duration || 0"
-      step="0.1"
-      :value="position"
-      :disabled="!duration"
-      @input="seek"
+    <ChapterMediaPreview
+      v-if="current"
+      :key="current.id"
+      ref="preview"
+      :chapter="current"
+      :master-gain="project.masterGain"
+      compact
+      @starting="transportStarting"
+      @playing="transportPlaying"
+      @ended="ended"
+      @time="emit('time', $event)"
     />
+    <div v-if="gapLeft > 0" class="gap-transport">
+      <span>章节间停顿 · {{ gapLeft.toFixed(1) }}s</span
+      ><button type="button" @click="playing ? pause() : play()">
+        {{ playing ? "暂停" : "继续" }}</button
+      ><button type="button" @click="stop">停止</button>
+    </div>
     <div v-if="items.length > 1" class="chapter-jumps">
       <button
-        v-for="(item, i) in items"
-        :key="item.chapter.id"
+        v-for="(chapter, i) in items"
+        :key="chapter.id"
         type="button"
         :class="{ active: i === index }"
         @click="choose(i)"
       >
-        {{ i + 1 }}. {{ item.chapter.title }}
+        {{ i + 1 }}. {{ chapter.title }}
       </button>
     </div>
-    <p v-if="error" class="notice" role="alert">{{ error }}</p>
   </section>
 </template>
 <style scoped>
-.sequence-player {
-  padding: 0;
-  background: var(--color-surface);
+.sequence-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--color-muted);
+  font-size: 11px;
 }
-.sequence-heading,
-.transport {
+.notice {
+  color: var(--color-warning);
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.chapter-transport {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin: 12px 0;
 }
-.sequence-heading {
-  justify-content: space-between;
-  margin-bottom: 10px;
+.chapter-transport strong {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
 }
-.sequence-heading span,
-.clock {
+.chapter-jumps,
+.gap-transport {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.gap-transport {
+  align-items: center;
   font-size: 12px;
   color: var(--color-muted);
 }
-.sequence-player video {
-  width: 100%;
-  max-height: 300px;
-  background: #12171a;
-  border-radius: 10px;
-  margin-bottom: 10px;
-}
-.sequence-player audio {
-  display: none;
-}
-.transport {
-  flex-wrap: wrap;
-}
 button {
   border: 1px solid var(--color-line);
-  background: transparent;
+  background: var(--color-surface);
   color: inherit;
-  border-radius: 8px;
-  padding: 7px 10px;
-  cursor: pointer;
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-size: 11px;
 }
 button:disabled {
-  cursor: default;
   opacity: 0.4;
 }
-.play,
 .chapter-jumps .active {
   background: var(--color-accent);
   color: #fff;
   border-color: transparent;
-}
-.current-title {
-  flex: 1;
-  font-size: 13px;
-  min-width: 110px;
-}
-input[type="range"] {
-  width: 100%;
-  margin: 12px 0 3px;
-  accent-color: var(--color-accent);
-}
-.notice {
-  color: var(--color-warning);
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 6px 0 12px;
-}
-.chapter-jumps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 10px;
-}
-.chapter-jumps button {
-  font-size: 11px;
-  padding: 5px 8px;
 }
 </style>

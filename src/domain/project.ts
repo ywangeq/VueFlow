@@ -25,6 +25,47 @@ export function chapterStatus(chapter: Chapter, kind: MediaKind): string {
     return "待修改";
   return chapter.approvedVersionIds.includes(version.id) ? "已通过" : "待试听";
 }
+/** A chapter may contain audio, video, or both; only its selected assets need review. */
+export function combinedChapterStatus(chapter: Chapter): string {
+  const versions = [
+    activeVersion(chapter, "audio"),
+    activeVersion(chapter, "video"),
+  ].filter((version): version is AssetVersion => version !== null);
+  if (!versions.length) return "待生成";
+  if (
+    versions.some(
+      (version) =>
+        version.textSnapshot !== chapter.text ||
+        (version.directionSnapshot !== undefined &&
+          version.directionSnapshot !== chapter.direction),
+    )
+  )
+    return "待更新";
+  const activeIds = new Set(versions.map((version) => version.id));
+  if (
+    chapter.comments.some(
+      (comment) =>
+        !comment.resolved &&
+        comment.versionId !== null &&
+        activeIds.has(comment.versionId),
+    )
+  )
+    return "待修改";
+  return versions.every((version) =>
+    chapter.approvedVersionIds.includes(version.id),
+  )
+    ? "已通过"
+    : "待审阅";
+}
+
+/** Audio and video in one chapter share its timeline span. */
+export function chapterDuration(chapter: Chapter): number {
+  return Math.max(
+    activeVersion(chapter, "audio")?.duration ?? 0,
+    activeVersion(chapter, "video")?.duration ?? 0,
+  );
+}
+
 export function newChapter(index: number): Chapter {
   return {
     id: uid(),

@@ -4,13 +4,12 @@ import RelationGraph, {
   type GraphLink,
   type GraphNode,
 } from "../vendor/scaffold/components/charts/RelationGraph.vue";
-import type { Chapter, MediaKind } from "../domain/types";
-import { chapterStatus } from "../domain/project";
+import type { Chapter } from "../domain/types";
+import { combinedChapterStatus } from "../domain/project";
 
 const props = defineProps<{
   chapters: Chapter[];
   selectedId: string | null;
-  kind: MediaKind;
   projectTitle: string;
 }>();
 const emit = defineEmits<{ select: [id: string] }>();
@@ -25,20 +24,29 @@ const height = computed(() =>
 
 function chapterState(chapter: Chapter) {
   // The domain helper owns validity and approval policy for both the outline and graph.
-  const status = chapterStatus(chapter, props.kind);
+  const status = combinedChapterStatus(chapter);
   if (status === "待生成")
     return { text: status, tone: "accent" as const, ratio: 0 };
-  if (status === "文稿已更新" || status === "表现要求已更新")
+  if (status === "待更新")
     return { text: status, tone: "danger" as const, ratio: 0.25 };
   if (status === "待修改")
     return { text: status, tone: "danger" as const, ratio: 0.5 };
   if (status === "已通过")
     return { text: status, tone: "lime" as const, ratio: 1 };
   return {
-    text: props.kind === "video" && status === "待试听" ? "待审看" : status,
+    text: status,
     tone: "accent" as const,
     ratio: 0.75,
   };
+}
+function mediaCounts(chapter: Chapter) {
+  const audio = chapter.versions.filter(
+    (version) => version.kind === "audio",
+  ).length;
+  const video = chapter.versions.filter(
+    (version) => version.kind === "video",
+  ).length;
+  return `音频 ${audio}版 · 视频 ${video}版`;
 }
 const nodes = computed<GraphNode[]>(() => {
   const w = size.value.w || 760;
@@ -48,7 +56,7 @@ const nodes = computed<GraphNode[]>(() => {
       x: w / 2,
       y: 108,
       label: props.projectTitle || "未命名工程",
-      sub: `${props.chapters.length} 个章节 · ${props.kind === "audio" ? "音频" : "视频"}工作流`,
+      sub: `${props.chapters.length} 个章节 · 音视频共用工作流`,
       kind: "core",
       size: 76,
       interactive: false,
@@ -63,24 +71,22 @@ const nodes = computed<GraphNode[]>(() => {
     );
     const col = index % columns.value;
     const state = chapterState(chapter);
-    const versions = chapter.versions.filter(
-      (item) => item.kind === props.kind,
-    ).length;
+    const media = mediaCounts(chapter);
     result.push({
       id: chapter.id,
       x: ((col + 0.5) * w) / rowCount,
       y: 300 + row * 205,
       label: `${String(index + 1).padStart(2, "0")}  ${chapter.title || "未命名章节"}`,
-      sub: `${state.text} · ${versions} 个版本`,
+      sub: `${state.text}\n${media}`,
       kind: "hub",
       size: 84,
       count: String(index + 1).padStart(2, "0"),
       tone: state.tone,
       ratio: state.ratio,
-      icon: props.kind === "audio" ? "activity" : "monitor",
+      icon: "layers",
       from: "__project__",
       delay: Math.min(index * 0.045, 0.5),
-      title: `${chapter.title}：${state.text}，${versions} 个${props.kind === "audio" ? "音频" : "视频"}版本`,
+      title: `${chapter.title}：${state.text}，${media}`,
     });
   });
   return result;
@@ -132,27 +138,32 @@ function selectNode(node: GraphNode) {
         :links="links"
         :active-id="selectedId"
         variant="stage"
-        :label="`${projectTitle}，${kind === 'audio' ? '音频' : '视频'}章节节点；使用 Tab 或方向键选择章节`"
+        :label="`${projectTitle}，音视频章节节点；使用 Tab 或方向键选择章节`"
         @select="selectNode"
       />
     </div>
-    <ol v-else class="chapter-list">
+    <ol v-else class="graph-chapter-list">
       <li v-for="(chapter, index) in chapters" :key="chapter.id">
         <button
           type="button"
           :aria-pressed="selectedId === chapter.id"
           @click="emit('select', chapter.id)"
         >
-          <span class="chapter-index">{{
+          <span class="graph-chapter-index">{{
             String(index + 1).padStart(2, "0")
           }}</span>
-          <span class="chapter-name">{{ chapter.title || "未命名章节" }}</span>
+          <span class="graph-chapter-copy">
+            <span class="chapter-name">{{
+              chapter.title || "未命名章节"
+            }}</span>
+            <span class="graph-media-counts">{{ mediaCounts(chapter) }}</span>
+          </span>
           <span class="chapter-status">{{ chapterState(chapter).text }}</span>
         </button>
       </li>
     </ol>
     <p v-if="chapters.length && view === 'graph'" class="graph-help">
-      点击章节打开编辑 · 表盘展示验收进度 · 顺序以章节列表为准
+      每个章节同时管理音频与视频 · 表盘展示当前素材验收进度
     </p>
   </section>
 </template>
@@ -209,7 +220,7 @@ function selectNode(node: GraphNode) {
   border: 1px dashed #d9dfda;
   border-radius: 14px;
 }
-.chapter-list {
+.graph-chapter-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -218,7 +229,7 @@ function selectNode(node: GraphNode) {
   max-height: 610px;
   overflow: auto;
 }
-.chapter-list button {
+.graph-chapter-list button {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -232,16 +243,26 @@ function selectNode(node: GraphNode) {
   color: #344840;
   cursor: pointer;
 }
-.chapter-list button[aria-pressed="true"] {
+.graph-chapter-list button[aria-pressed="true"] {
   background: #eef4e8;
   border-color: #83a578;
 }
-.chapter-index {
+.graph-chapter-index {
   font: 12px monospace;
   color: #788a7d;
 }
-.chapter-name {
+.graph-chapter-copy {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+.graph-media-counts {
+  color: #788078;
+  font-size: 11px;
+}
+.chapter-name {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
@@ -250,6 +271,30 @@ function selectNode(node: GraphNode) {
   flex-shrink: 0;
   color: #788078;
   font-size: 11px;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-text) {
+  width: 170px;
+  box-sizing: border-box;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-hub .rg-sub) {
+  width: 100%;
+  max-width: 100%;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-core .rg-body),
+.chapter-graph :deep(.rg.is-stage .rg-node.is-core .rg-text) {
+  width: 220px;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-core .rg-label) {
+  max-width: 210px;
+}
+.chapter-graph :deep(.rg.is-stage .rg-node.is-core .rg-sub) {
+  width: 220px;
+  max-width: 220px;
+  text-align: center;
+}
+.chapter-graph :deep(.rg-sub) {
+  white-space: pre-line;
+  line-height: 1.5;
 }
 button:focus-visible {
   outline: 2px solid #618765;

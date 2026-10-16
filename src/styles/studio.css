@@ -239,31 +239,7 @@ small {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-line);
 }
-.media-switch {
-  display: flex;
-  padding: 3px;
-  background: var(--color-soft);
-  border: 1px solid var(--color-line);
-  border-radius: 9px;
-  gap: 3px;
-}
-.media-switch button {
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  padding: 7px 14px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--color-muted);
-  font-size: 13px;
-  white-space: nowrap;
-}
-.media-switch button.active {
-  background: var(--color-surface);
-  color: var(--color-accent);
-  box-shadow: 0 1px 4px #24395c14;
-}
+
 .workspace-context {
   display: flex;
   align-items: center;
@@ -941,10 +917,7 @@ small {
     gap: 10px;
     height: 60px;
   }
-  .media-switch button {
-    padding: 7px 10px;
-    font-size: 12px;
-  }
+
   .repo-link {
     font-size: 10px;
   }
@@ -1092,5 +1065,68 @@ fieldset:disabled {
   }
   .chapter-copy {
     padding-right: 20px;
+  }
+}
+.unified-workspace-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.unified-workspace-label > span {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--color-muted);
+  margin-left: 12px;
+}
+.chapter-sources {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 20px;
+}
+.chapter-sources > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  min-width: 0;
+}
+.chapter-sources > div > span {
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+.chapter-sources strong {
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.generation-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.approve-chapter {
+  margin-top: 14px;
+}
+@media (max-width: 600px) {
+  .unified-workspace-label > span {
+    display: none;
+  }
+  .workspace-bar {
+    justify-content: space-between;
+  }
+  .workspace-bar .repo-link {
+    font-size: 11px;
+  }
+  .generation-actions .primary,
+  .generation-actions .secondary {
+    min-width: 0;
+    padding: 8px;
+    font-size: 12px;
   }
 }

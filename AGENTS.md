@@ -2,6 +2,7 @@
 
 - Vue 3 + TypeScript + Vite，复用 scaffold 原版 RelationGraph.vue，保留第三方许可。不引入 React 桥接。
 - 项目仅供非商业用途；第三方代码继续遵循各自许可。不得改写第三方版权。
+- 音视频共用一个章节图和节点，不分工作区或 sheet；一个节点同时管理旁白、画面、评论和任务。预览用共同起点与进度，后续时间线引用同一素材版本，不复制状态。
 - 领域对象以服务端 project 为唯一持久化来源：chapter、asset version、comment、generation job。画布坐标不决定章节播放顺序。
 - src/components 为界面，src/services 为媒体/HTTP边界，server 为本地持久化与任务执行；提供者差异放在适配边界。
 - data/ 保存私人素材及工程，必须忽略。禁止提交真实文稿、音色ID、凭据或个人音视频。

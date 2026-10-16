@@ -12,10 +12,18 @@ const js = ts.transpileModule(source, {
     module: ts.ModuleKind.ESNext,
   },
 }).outputText;
-const { volume, selectedVersion, exportAudio, claimPlayback, releasePlayback } =
-  await import(
-    `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`
-  );
+const {
+  volume,
+  selectedVersion,
+  exportAudio,
+  chapterPlayback,
+  waitForMediaReady,
+  syncChapterMedia,
+  claimPlayback,
+  releasePlayback,
+} = await import(
+  `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`
+);
 const version = { id: "a", kind: "audio", textSnapshot: "hello", duration: 2 };
 const chapter = {
   title: "Chapter",
@@ -195,4 +203,79 @@ test("export refuses obsolete performance direction when captured", async () => 
     }),
     /表演要求/,
   );
+});
+
+test("unified chapter playback uses max duration and separate narration mutes video", () => {
+  const video = { ...version, id: "v", kind: "video", duration: 5 };
+  const paired = chapterPlayback({
+    ...chapter,
+    activeVideoId: "v",
+    versions: [version, video],
+  });
+  assert.equal(paired.audio, version);
+  assert.equal(paired.video, video);
+  assert.equal(paired.duration, 5);
+  assert.equal(paired.muteVideo, true);
+  const videoOnly = chapterPlayback({
+    ...chapter,
+    activeAudioId: null,
+    activeVideoId: "v",
+    versions: [video],
+  });
+  assert.equal(videoOnly.duration, 5);
+  assert.equal(videoOnly.muteVideo, false);
+  const empty = chapterPlayback({ ...chapter, activeAudioId: null });
+  assert.equal(empty.duration, 0);
+  assert.equal(empty.audio, null);
+  assert.equal(empty.video, null);
+});
+
+test("narration is shared clock and video cannot outrun it", () => {
+  const audio = { currentTime: 0.02322, duration: 2, ended: false };
+  const video = { currentTime: 0.200163, duration: 5, ended: false };
+  assert.equal(syncChapterMedia(audio, video), audio.currentTime);
+  assert.equal(video.currentTime, audio.currentTime);
+  audio.currentTime = 2;
+  audio.ended = true;
+  video.currentTime = 2.3;
+  assert.equal(syncChapterMedia(audio, video), 2.3);
+  assert.equal(audio.currentTime, 2); // finished short narration stays at its end
+  audio.ended = false; // seeking to the short source end need not dispatch ended
+  assert.equal(syncChapterMedia(audio, video), 2.3);
+});
+test("media readiness waits for decoded data and removes listeners on success, abort, timeout", async () => {
+  class Media extends EventTarget {
+    readyState = 1;
+    seeking = false;
+    listeners = new Set();
+    addEventListener(type, handler, ...rest) {
+      this.listeners.add(type);
+      super.addEventListener(type, handler, ...rest);
+    }
+    removeEventListener(type, handler, ...rest) {
+      this.listeners.delete(type);
+      super.removeEventListener(type, handler, ...rest);
+    }
+  }
+  const media = new Media(),
+    controller = new AbortController();
+  const ready = waitForMediaReady(media, controller.signal, 100);
+  media.readyState = 3;
+  media.seeking = true;
+  media.dispatchEvent(new Event("canplay"));
+  assert.ok(media.listeners.size > 0);
+  media.seeking = false;
+  media.dispatchEvent(new Event("seeked"));
+  await ready;
+  assert.equal(media.listeners.size, 0);
+  media.readyState = 1;
+  const aborted = waitForMediaReady(media, controller.signal, 100);
+  controller.abort();
+  await assert.rejects(aborted, { name: "AbortError" });
+  assert.equal(media.listeners.size, 0);
+  await assert.rejects(
+    waitForMediaReady(media, new AbortController().signal, 5),
+    /超时/,
+  );
+  assert.equal(media.listeners.size, 0);
 });
